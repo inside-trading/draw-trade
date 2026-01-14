@@ -53,9 +53,11 @@ A price prediction drawing website that allows users to visualize asset prices a
 - `GET /api/prices/<symbol>` - Get price history
 - `GET /api/predictions/<symbol>` - Get community predictions for asset
 - `GET /api/predictions/all` - Get all predictions with pagination/filtering
-- `POST /api/predictions` - Submit new prediction (with optional staking)
+- `POST /api/predictions` - Submit new prediction (with optional staking), returns price series
 - `GET /api/auth/user` - Get current authenticated user
 - `GET /api/user/predictions` - Get current user's predictions
+- `GET /api/user/prediction/<symbol>` - Get user's latest prediction for an asset
+- `POST /api/predictions/<id>/score` - Update prediction accuracy score
 - `GET /auth/login` - Begin OAuth login flow
 - `GET /auth/logout` - Log out user
 
@@ -80,3 +82,9 @@ The project runs two servers:
 - January 2026: Created User model with token balance (default 1000 tokens)
 - January 2026: Added token staking on predictions
 - January 2026: Created community predictions table with sorting/filtering
+- January 2026: Added processed prediction line display (purple) after submission
+- January 2026: Added user's last prediction display on canvas
+- January 2026: Implemented auto-scroll to canvas when drawing starts
+- January 2026: Added live price polling every 30 seconds
+- January 2026: Implemented live scoring system with accuracy calculation
+- January 2026: Added accuracy score display in info bar

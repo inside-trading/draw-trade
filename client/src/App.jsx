@@ -15,6 +15,8 @@ const TIMEFRAMES = [
   { id: 'yearly', label: 'Yearly', interval: '1d', lookback: '1y' }
 ]
 
+const PRICE_POLL_INTERVAL = 30000
+
 function App() {
   const { user, isLoading: authLoading, isAuthenticated, refetch: refetchAuth } = useAuth()
   const [selectedAsset, setSelectedAsset] = useState(null)
@@ -31,6 +33,8 @@ function App() {
   const [customMax, setCustomMax] = useState('')
   const [stakedTokens, setStakedTokens] = useState(0)
   const [predictionsTableKey, setPredictionsTableKey] = useState(0)
+  const [userPrediction, setUserPrediction] = useState(null)
+  const [liveScore, setLiveScore] = useState(null)
 
   const displayBounds = useMemo(() => {
     if (!chartBounds) return null
@@ -101,12 +105,70 @@ function App() {
     }
   }, [])
 
+  const fetchUserPrediction = useCallback(async (symbol, tf) => {
+    if (!isAuthenticated) {
+      setUserPrediction(null)
+      return
+    }
+    try {
+      const response = await axios.get(`/api/user/prediction/${symbol}`, {
+        params: { timeframe: tf },
+        withCredentials: true
+      })
+      if (response.data.prediction) {
+        setUserPrediction(response.data.prediction.priceSeries)
+        setLiveScore({
+          accuracy: response.data.prediction.accuracyScore,
+          status: response.data.prediction.status,
+          predictionId: response.data.prediction.id
+        })
+      } else {
+        setUserPrediction(null)
+        setLiveScore(null)
+      }
+    } catch (err) {
+      console.error('Failed to fetch user prediction:', err)
+      setUserPrediction(null)
+    }
+  }, [isAuthenticated])
+
+  const updateScore = useCallback(async () => {
+    if (!liveScore?.predictionId || !chartBounds?.lastPrice) return
+    try {
+      const response = await axios.post(`/api/predictions/${liveScore.predictionId}/score`, {
+        currentPrice: chartBounds.lastPrice
+      })
+      setLiveScore(prev => ({
+        ...prev,
+        accuracy: response.data.accuracyScore,
+        status: response.data.status,
+        progress: response.data.progress
+      }))
+    } catch (err) {
+      console.error('Failed to update score:', err)
+    }
+  }, [liveScore?.predictionId, chartBounds?.lastPrice])
+
   useEffect(() => {
     if (selectedAsset) {
       fetchPriceData(selectedAsset.symbol, timeframe)
       fetchPredictions(selectedAsset.symbol, timeframe)
+      fetchUserPrediction(selectedAsset.symbol, timeframe)
     }
-  }, [selectedAsset, timeframe, fetchPriceData, fetchPredictions])
+  }, [selectedAsset, timeframe, fetchPriceData, fetchPredictions, fetchUserPrediction])
+
+  useEffect(() => {
+    if (!selectedAsset) return
+    
+    const pollInterval = setInterval(() => {
+      fetchPriceData(selectedAsset.symbol, timeframe)
+      if (liveScore?.predictionId) {
+        updateScore()
+      }
+    }, PRICE_POLL_INTERVAL)
+    
+    return () => clearInterval(pollInterval)
+  }, [selectedAsset, timeframe, fetchPriceData, liveScore?.predictionId, updateScore])
 
   const handleAssetSelect = (asset) => {
     setSelectedAsset(asset)
@@ -116,6 +178,8 @@ function App() {
     setSentimentSlider(50)
     setCustomMin('')
     setCustomMax('')
+    setUserPrediction(null)
+    setLiveScore(null)
   }
 
   const handleTimeframeChange = (tf) => {
@@ -282,6 +346,7 @@ function App() {
           userTokenBalance={user?.tokenBalance || 0}
           stakedTokens={stakedTokens}
           onStakeChange={setStakedTokens}
+          userPrediction={userPrediction}
         />
       </div>
 
@@ -299,6 +364,15 @@ function App() {
             <div className="label">Timeframe</div>
             <div className="value">{TIMEFRAMES.find(t => t.id === timeframe)?.label}</div>
           </div>
+          {liveScore && (
+            <div className="info-item live-score">
+              <div className="label">Your Accuracy</div>
+              <div className={`value ${liveScore.accuracy >= 50 ? 'up' : 'down'}`}>
+                {liveScore.accuracy !== null ? `${liveScore.accuracy.toFixed(1)}%` : '-'}
+                {liveScore.progress && <span className="progress-indicator"> ({liveScore.progress}%)</span>}
+              </div>
+            </div>
+          )}
           <div className="info-item predictions-count">
             <div className="label">Community Predictions</div>
             <div className="value">{predictionCount}</div>

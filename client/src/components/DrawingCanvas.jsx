@@ -35,12 +35,15 @@ function DrawingCanvas({
   isAuthenticated = false,
   userTokenBalance = 0,
   stakedTokens = 0,
-  onStakeChange
+  onStakeChange,
+  userPrediction = null
 }) {
   const canvasRef = useRef(null)
+  const containerRef = useRef(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [drawnPoints, setDrawnPoints] = useState([])
   const [submitting, setSubmitting] = useState(false)
+  const [processedPrediction, setProcessedPrediction] = useState(null)
 
   const priceRange = useMemo(() => {
     if (!displayBounds) return { min: 0, max: 100 }
@@ -161,11 +164,61 @@ function DrawingCanvas({
       ctx.fillText('Community Average', 10, 20)
     }
 
+    if (processedPrediction && processedPrediction.length > 1 && chartBounds) {
+      ctx.strokeStyle = '#9f7aea'
+      ctx.lineWidth = 3
+      ctx.setLineDash([])
+      ctx.beginPath()
+      
+      processedPrediction.forEach((point, index) => {
+        const x = (index / (processedPrediction.length - 1)) * drawableWidth
+        const y = drawableHeight - ((point.price - priceRange.min) / (priceRange.max - priceRange.min)) * drawableHeight
+        
+        if (index === 0) {
+          ctx.moveTo(x, y)
+        } else {
+          ctx.lineTo(x, y)
+        }
+      })
+      ctx.stroke()
+
+      ctx.fillStyle = 'rgba(159, 122, 234, 0.8)'
+      ctx.font = '11px sans-serif'
+      ctx.textAlign = 'left'
+      ctx.fillText('Your Prediction', 10, 35)
+    }
+
+    if (userPrediction && userPrediction.length > 1 && chartBounds && !processedPrediction) {
+      ctx.strokeStyle = '#9f7aea'
+      ctx.lineWidth = 2
+      ctx.setLineDash([4, 4])
+      ctx.beginPath()
+      
+      userPrediction.forEach((point, index) => {
+        const x = (index / (userPrediction.length - 1)) * drawableWidth
+        const y = drawableHeight - ((point.price - priceRange.min) / (priceRange.max - priceRange.min)) * drawableHeight
+        
+        if (index === 0) {
+          ctx.moveTo(x, y)
+        } else {
+          ctx.lineTo(x, y)
+        }
+      })
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      ctx.fillStyle = 'rgba(159, 122, 234, 0.6)'
+      ctx.font = '11px sans-serif'
+      ctx.textAlign = 'left'
+      ctx.fillText('Your Last Prediction', 10, 35)
+    }
+
     if (drawnPoints.length > 1) {
       ctx.strokeStyle = '#ff6b6b'
       ctx.lineWidth = 3
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
+      ctx.setLineDash([])
       ctx.beginPath()
       ctx.moveTo(drawnPoints[0].x, drawnPoints[0].y)
       
@@ -174,7 +227,7 @@ function DrawingCanvas({
       }
       ctx.stroke()
     }
-  }, [chartBounds, averagePrediction, drawnPoints, enabled, priceRange, timeRange, timeframe])
+  }, [chartBounds, averagePrediction, drawnPoints, enabled, priceRange, timeRange, timeframe, processedPrediction, userPrediction])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -199,8 +252,13 @@ function DrawingCanvas({
   const startDrawing = (e) => {
     if (!enabled) return
     setIsDrawing(true)
+    setProcessedPrediction(null)
     const point = getCanvasPoint(e)
     setDrawnPoints([point])
+    
+    if (containerRef.current) {
+      containerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
   }
 
   const draw = (e) => {
@@ -225,7 +283,7 @@ function DrawingCanvas({
     
     setSubmitting(true)
     try {
-      await onSubmit(drawnPoints, {
+      const result = await onSubmit(drawnPoints, {
         width: canvas.width,
         height: canvas.height,
         priceMin: priceRange.min,
@@ -233,6 +291,10 @@ function DrawingCanvas({
         bottomPadding: 30,
         rightPadding: 60
       })
+      
+      if (result && result.priceSeries) {
+        setProcessedPrediction(result.priceSeries)
+      }
       setDrawnPoints([])
     } catch (err) {
       console.error('Submit error:', err)
@@ -260,7 +322,7 @@ function DrawingCanvas({
   }
 
   return (
-    <div className="drawing-canvas-container">
+    <div className="drawing-canvas-container" ref={containerRef}>
       <div className="canvas-controls">
         <button 
           className="canvas-btn clear" 

@@ -357,7 +357,8 @@ def submit_prediction():
         'success': True,
         'predictionId': prediction.id,
         'message': 'Prediction saved successfully',
-        'tokenBalance': user_balance
+        'tokenBalance': user_balance,
+        'priceSeries': price_series
     })
 
 @app.route('/api/user/predictions')
@@ -384,6 +385,118 @@ def get_user_predictions():
             }
             for p in predictions
         ]
+    })
+
+@app.route('/api/user/prediction/<symbol>')
+def get_user_latest_prediction(symbol):
+    if not current_user.is_authenticated:
+        return jsonify({'prediction': None})
+    
+    timeframe = request.args.get('timeframe', 'daily')
+    
+    prediction = Prediction.query.filter_by(
+        user_id=current_user.id,
+        symbol=symbol.upper(),
+        timeframe=timeframe
+    ).order_by(Prediction.created_at.desc()).first()
+    
+    if not prediction:
+        return jsonify({'prediction': None})
+    
+    price_series = json.loads(prediction.price_series) if prediction.price_series else []
+    
+    return jsonify({
+        'prediction': {
+            'id': prediction.id,
+            'symbol': prediction.symbol,
+            'timeframe': prediction.timeframe,
+            'startPrice': prediction.start_price,
+            'endPrice': prediction.end_price,
+            'priceSeries': price_series,
+            'stakedTokens': prediction.staked_tokens,
+            'accuracyScore': prediction.accuracy_score,
+            'status': prediction.status,
+            'createdAt': prediction.created_at.isoformat()
+        }
+    })
+
+@app.route('/api/predictions/<int:prediction_id>/score', methods=['POST'])
+def update_prediction_score(prediction_id):
+    prediction = Prediction.query.get(prediction_id)
+    if not prediction:
+        return jsonify({'error': 'Prediction not found'}), 404
+    
+    if prediction.user_id and current_user.is_authenticated:
+        if str(prediction.user_id) != str(current_user.id):
+            return jsonify({'error': 'Unauthorized'}), 403
+    
+    data = request.get_json()
+    current_price = data.get('currentPrice')
+    
+    if current_price is None:
+        return jsonify({'error': 'Current price required'}), 400
+    
+    price_series = json.loads(prediction.price_series) if prediction.price_series else []
+    
+    if not price_series:
+        return jsonify({'error': 'No price series data'}), 400
+    
+    now = datetime.utcnow()
+    prediction_created = prediction.created_at
+    
+    timeframe_durations = {
+        'hourly': timedelta(hours=1),
+        'daily': timedelta(days=1),
+        'weekly': timedelta(weeks=1),
+        'monthly': timedelta(days=30),
+        'yearly': timedelta(days=365)
+    }
+    
+    total_duration = timeframe_durations.get(prediction.timeframe, timedelta(days=1))
+    elapsed = now - prediction_created
+    progress = min(1.0, elapsed.total_seconds() / total_duration.total_seconds())
+    
+    if progress >= 0.01:
+        expected_index = int(progress * (len(price_series) - 1))
+        expected_index = min(expected_index, len(price_series) - 1)
+        expected_price = price_series[expected_index]['price']
+        
+        prediction_direction = 1 if expected_price > prediction.start_price else -1
+        actual_direction = 1 if current_price > prediction.start_price else -1
+        direction_correct = prediction_direction == actual_direction
+        
+        price_diff_percent = abs(expected_price - current_price) / prediction.start_price * 100
+        accuracy = max(0, 100 - price_diff_percent * 2)
+        
+        if direction_correct:
+            accuracy = min(100, accuracy + 20)
+        else:
+            accuracy = max(0, accuracy - 20)
+        
+        prediction.accuracy_score = round(accuracy, 2)
+        
+        if progress >= 1.0 and prediction.status == 'active':
+            prediction.status = 'completed'
+            if prediction.staked_tokens > 0:
+                base_reward = prediction.staked_tokens
+                reward_multiplier = accuracy / 50
+                rewards = int(base_reward * reward_multiplier)
+                prediction.rewards_earned = rewards
+                
+                if prediction.user_id:
+                    user = User.query.get(prediction.user_id)
+                    if user:
+                        user.token_balance += rewards
+                        db.session.add(user)
+        
+        db.session.commit()
+    
+    return jsonify({
+        'predictionId': prediction.id,
+        'accuracyScore': prediction.accuracy_score,
+        'status': prediction.status,
+        'rewardsEarned': prediction.rewards_earned,
+        'progress': round(progress * 100, 1)
     })
 
 @app.route('/api/health')
