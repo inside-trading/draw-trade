@@ -143,7 +143,8 @@ body {
   border-radius: 12px;
   overflow: hidden;
   border: 2px solid #2d3748;
-  min-height: 500px;
+  min-height: 450px;
+  max-height: calc(100vh - 300px);
 }
 
 .price-chart-container {
@@ -233,12 +234,42 @@ body {
   cursor: not-allowed;
 }
 
-.price-range-display {
+.price-inputs {
   display: flex;
   justify-content: space-between;
-  margin-top: 8px;
+  margin-top: 10px;
+  gap: 15px;
+}
+
+.price-input-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.price-input-group label {
   font-size: 11px;
   color: #8892b0;
+}
+
+.price-text-input {
+  width: 90px;
+  padding: 6px 8px;
+  font-size: 12px;
+  border: 1px solid #2d3748;
+  border-radius: 4px;
+  background: #151a24;
+  color: #e0e0e0;
+  outline: none;
+}
+
+.price-text-input:focus {
+  border-color: #00d4ff;
+}
+
+.price-text-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .drawing-canvas-container {

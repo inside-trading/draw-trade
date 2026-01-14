@@ -23,6 +23,8 @@ function App() {
   const [predictionCount, setPredictionCount] = useState(0)
   const [chartBounds, setChartBounds] = useState(null)
   const [sentimentSlider, setSentimentSlider] = useState(50)
+  const [customMin, setCustomMin] = useState('')
+  const [customMax, setCustomMax] = useState('')
 
   const displayBounds = useMemo(() => {
     if (!chartBounds) return null
@@ -37,11 +39,22 @@ function App() {
     const upside = basePadding + extraExpansion * Math.max(0, sliderNormalized)
     const downside = basePadding + extraExpansion * Math.max(0, -sliderNormalized)
     
-    return {
-      min: Math.max(0, currentPrice - (currentPrice - chartBounds.minPrice) - downside),
-      max: currentPrice + (chartBounds.maxPrice - currentPrice) + upside
+    let min = Math.max(0, currentPrice - (currentPrice - chartBounds.minPrice) - downside)
+    let max = currentPrice + (chartBounds.maxPrice - currentPrice) + upside
+    
+    if (customMin !== '' && !isNaN(parseFloat(customMin))) {
+      min = Math.max(0, parseFloat(customMin))
     }
-  }, [chartBounds, sentimentSlider])
+    if (customMax !== '' && !isNaN(parseFloat(customMax))) {
+      max = parseFloat(customMax)
+    }
+    
+    if (max <= min) {
+      max = min + historicalRange * 0.1
+    }
+    
+    return { min, max }
+  }, [chartBounds, sentimentSlider, customMin, customMax])
 
   const fetchPriceData = useCallback(async (symbol, tf) => {
     setLoading(true)
@@ -95,6 +108,8 @@ function App() {
     setPredictions([])
     setAveragePrediction([])
     setSentimentSlider(50)
+    setCustomMin('')
+    setCustomMax('')
   }
 
   const handleTimeframeChange = (tf) => {
@@ -165,13 +180,49 @@ function App() {
             min="0"
             max="100"
             value={sentimentSlider}
-            onChange={(e) => setSentimentSlider(parseInt(e.target.value))}
+            onChange={(e) => {
+              setSentimentSlider(parseInt(e.target.value))
+              setCustomMin('')
+              setCustomMax('')
+            }}
             className="sentiment-slider"
             disabled={!selectedAsset || priceData.length === 0}
           />
-          <div className="price-range-display">
-            <span>${displayBounds?.min?.toFixed(2) || '0.00'}</span>
-            <span>${displayBounds?.max?.toFixed(2) || '100.00'}</span>
+          <div className="price-inputs">
+            <div className="price-input-group">
+              <label>Min $</label>
+              <input
+                type="number"
+                value={customMin !== '' ? customMin : (displayBounds?.min?.toFixed(2) || '')}
+                onChange={(e) => setCustomMin(e.target.value)}
+                onBlur={() => {
+                  if (customMin !== '' && !isNaN(parseFloat(customMin))) {
+                    setCustomMin(parseFloat(customMin).toFixed(2))
+                  }
+                }}
+                className="price-text-input"
+                disabled={!selectedAsset || priceData.length === 0}
+                step="0.01"
+                placeholder="Auto"
+              />
+            </div>
+            <div className="price-input-group">
+              <label>Max $</label>
+              <input
+                type="number"
+                value={customMax !== '' ? customMax : (displayBounds?.max?.toFixed(2) || '')}
+                onChange={(e) => setCustomMax(e.target.value)}
+                onBlur={() => {
+                  if (customMax !== '' && !isNaN(parseFloat(customMax))) {
+                    setCustomMax(parseFloat(customMax).toFixed(2))
+                  }
+                }}
+                className="price-text-input"
+                disabled={!selectedAsset || priceData.length === 0}
+                step="0.01"
+                placeholder="Auto"
+              />
+            </div>
           </div>
         </div>
       </div>
