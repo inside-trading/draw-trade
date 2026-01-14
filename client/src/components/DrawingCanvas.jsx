@@ -1,10 +1,70 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react'
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
+
+const TIMEFRAME_CONFIG = {
+  hourly: { duration: 60 * 60 * 1000, labels: 6, format: 'HH:mm' },
+  daily: { duration: 24 * 60 * 60 * 1000, labels: 6, format: 'HH:mm' },
+  weekly: { duration: 7 * 24 * 60 * 60 * 1000, labels: 7, format: 'ddd' },
+  monthly: { duration: 30 * 24 * 60 * 60 * 1000, labels: 5, format: 'MMM d' },
+  yearly: { duration: 365 * 24 * 60 * 60 * 1000, labels: 6, format: 'MMM' }
+}
+
+function formatDate(date, format, timeframe) {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  
+  if (timeframe === 'hourly' || timeframe === 'daily') {
+    const hours = date.getHours().toString().padStart(2, '0')
+    const mins = date.getMinutes().toString().padStart(2, '0')
+    return `${hours}:${mins}`
+  } else if (timeframe === 'weekly') {
+    return days[date.getDay()]
+  } else if (timeframe === 'monthly') {
+    return `${months[date.getMonth()]} ${date.getDate()}`
+  } else {
+    return months[date.getMonth()]
+  }
+}
 
 function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, timeframe }) {
   const canvasRef = useRef(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [drawnPoints, setDrawnPoints] = useState([])
   const [submitting, setSubmitting] = useState(false)
+  const [customPriceMin, setCustomPriceMin] = useState('')
+  const [customPriceMax, setCustomPriceMax] = useState('')
+
+  const priceRange = useMemo(() => {
+    if (!chartBounds) return { min: 0, max: 100 }
+    
+    const range = chartBounds.maxPrice - chartBounds.minPrice
+    const padding = range * 0.1
+    const defaultMin = chartBounds.minPrice - padding
+    const defaultMax = chartBounds.maxPrice + padding
+    
+    let minVal = customPriceMin !== '' ? parseFloat(customPriceMin) : defaultMin
+    let maxVal = customPriceMax !== '' ? parseFloat(customPriceMax) : defaultMax
+    
+    if (!isFinite(minVal)) minVal = defaultMin
+    if (!isFinite(maxVal)) maxVal = defaultMax
+    
+    if (maxVal <= minVal) {
+      maxVal = minVal + Math.abs(defaultMax - defaultMin) || 10
+    }
+    
+    return { min: minVal, max: maxVal }
+  }, [chartBounds, customPriceMin, customPriceMax])
+
+  const timeRange = useMemo(() => {
+    const now = new Date()
+    const config = TIMEFRAME_CONFIG[timeframe] || TIMEFRAME_CONFIG.daily
+    const endTime = new Date(now.getTime() + config.duration)
+    return { start: now, end: endTime, labels: config.labels }
+  }, [timeframe])
+
+  useEffect(() => {
+    setCustomPriceMin('')
+    setCustomPriceMax('')
+  }, [chartBounds])
 
   const getCanvasPoint = useCallback((e) => {
     const canvas = canvasRef.current
@@ -25,6 +85,10 @@ function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, time
     const ctx = canvas.getContext('2d')
     const width = canvas.width
     const height = canvas.height
+    const bottomPadding = 30
+    const rightPadding = 60
+    const drawableWidth = width - rightPadding
+    const drawableHeight = height - bottomPadding
 
     ctx.fillStyle = '#151a24'
     ctx.fillRect(0, 0, width, height)
@@ -32,57 +96,68 @@ function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, time
     ctx.strokeStyle = 'rgba(45, 55, 72, 0.5)'
     ctx.lineWidth = 1
     for (let i = 0; i < 5; i++) {
-      const y = (height / 5) * i
+      const y = (drawableHeight / 5) * i
       ctx.beginPath()
       ctx.moveTo(0, y)
-      ctx.lineTo(width, y)
+      ctx.lineTo(drawableWidth, y)
       ctx.stroke()
     }
 
-    if (chartBounds && enabled) {
+    for (let i = 0; i <= timeRange.labels; i++) {
+      const x = (drawableWidth / timeRange.labels) * i
+      ctx.beginPath()
+      ctx.moveTo(x, 0)
+      ctx.lineTo(x, drawableHeight)
+      ctx.stroke()
+    }
+
+    if (enabled) {
+      const lastPriceY = chartBounds ? 
+        drawableHeight - ((chartBounds.lastPrice - priceRange.min) / (priceRange.max - priceRange.min)) * drawableHeight :
+        drawableHeight * 0.5
+      
       ctx.strokeStyle = 'rgba(0, 212, 255, 0.3)'
       ctx.lineWidth = 2
       ctx.setLineDash([5, 5])
-      const startY = height * 0.5
       ctx.beginPath()
-      ctx.moveTo(0, startY)
-      ctx.lineTo(30, startY)
+      ctx.moveTo(0, lastPriceY)
+      ctx.lineTo(30, lastPriceY)
       ctx.stroke()
       ctx.setLineDash([])
 
       ctx.fillStyle = '#00d4ff'
       ctx.beginPath()
-      ctx.arc(0, startY, 6, 0, Math.PI * 2)
+      ctx.arc(0, lastPriceY, 6, 0, Math.PI * 2)
       ctx.fill()
 
       ctx.fillStyle = '#8892b0'
-      ctx.font = '12px sans-serif'
+      ctx.font = '11px sans-serif'
       ctx.textAlign = 'right'
-      const priceRange = chartBounds.maxPrice - chartBounds.minPrice
-      const padding = priceRange * 0.1
-      const displayMax = chartBounds.maxPrice + padding
-      const displayMin = chartBounds.minPrice - padding
       
       for (let i = 0; i <= 4; i++) {
-        const price = displayMax - (i / 4) * (displayMax - displayMin)
-        const y = (height / 4) * i
+        const price = priceRange.max - (i / 4) * (priceRange.max - priceRange.min)
+        const y = (drawableHeight / 4) * i
         ctx.fillText('$' + price.toFixed(2), width - 5, y + 4)
+      }
+
+      ctx.textAlign = 'center'
+      for (let i = 0; i <= timeRange.labels; i++) {
+        const progress = i / timeRange.labels
+        const timestamp = new Date(timeRange.start.getTime() + progress * (timeRange.end.getTime() - timeRange.start.getTime()))
+        const x = (drawableWidth / timeRange.labels) * i
+        const label = formatDate(timestamp, '', timeframe)
+        ctx.fillText(label, x, height - 10)
       }
     }
 
-    if (averagePrediction && averagePrediction.length > 1) {
+    if (averagePrediction && averagePrediction.length > 1 && chartBounds) {
       ctx.strokeStyle = 'rgba(128, 128, 128, 0.8)'
       ctx.lineWidth = 3
       ctx.beginPath()
       
-      const priceRange = chartBounds.maxPrice - chartBounds.minPrice
-      const padding = priceRange * 0.1
-      const displayMax = chartBounds.maxPrice + padding
-      const displayMin = chartBounds.minPrice - padding
-      
       averagePrediction.forEach((point, index) => {
-        const x = (index / (averagePrediction.length - 1)) * width
-        const y = height - ((point.price - displayMin) / (displayMax - displayMin)) * height
+        const x = (index / (averagePrediction.length - 1)) * drawableWidth
+        const y = drawableHeight - ((point.price - priceRange.min) / (priceRange.max - priceRange.min)) * drawableHeight
         
         if (index === 0) {
           ctx.moveTo(x, y)
@@ -111,7 +186,7 @@ function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, time
       }
       ctx.stroke()
     }
-  }, [chartBounds, averagePrediction, drawnPoints, enabled])
+  }, [chartBounds, averagePrediction, drawnPoints, enabled, priceRange, timeRange, timeframe])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -164,7 +239,11 @@ function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, time
     try {
       await onSubmit(drawnPoints, {
         width: canvas.width,
-        height: canvas.height
+        height: canvas.height,
+        priceMin: priceRange.min,
+        priceMax: priceRange.max,
+        bottomPadding: 30,
+        rightPadding: 60
       })
       setDrawnPoints([])
     } catch (err) {
@@ -186,11 +265,37 @@ function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, time
     draw({ clientX: touch.clientX, clientY: touch.clientY })
   }
 
+  const defaultMin = chartBounds ? (chartBounds.minPrice - (chartBounds.maxPrice - chartBounds.minPrice) * 0.1).toFixed(2) : '0'
+  const defaultMax = chartBounds ? (chartBounds.maxPrice + (chartBounds.maxPrice - chartBounds.minPrice) * 0.1).toFixed(2) : '100'
+
   return (
     <div className="drawing-canvas-container">
       <div className="canvas-header">
         <h3>Draw Your Prediction</h3>
         <p>Continue the price line from the left edge</p>
+      </div>
+      
+      <div className="price-range-controls">
+        <div className="price-input-group">
+          <label>Max $</label>
+          <input
+            type="number"
+            value={customPriceMax}
+            onChange={(e) => setCustomPriceMax(e.target.value)}
+            placeholder={defaultMax}
+            disabled={!enabled}
+          />
+        </div>
+        <div className="price-input-group">
+          <label>Min $</label>
+          <input
+            type="number"
+            value={customPriceMin}
+            onChange={(e) => setCustomPriceMin(e.target.value)}
+            placeholder={defaultMin}
+            disabled={!enabled}
+          />
+        </div>
       </div>
       
       <div className="canvas-controls">

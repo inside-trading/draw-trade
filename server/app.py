@@ -178,11 +178,21 @@ def submit_prediction():
     
     canvas_height = canvas_dimensions.get('height', 400)
     canvas_width_actual = canvas_dimensions.get('width', 400)
+    bottom_padding = canvas_dimensions.get('bottomPadding', 30)
+    right_padding = canvas_dimensions.get('rightPadding', 60)
+    drawable_height = canvas_height - bottom_padding
     
-    price_range = chart_bounds.get('maxPrice', 100) - chart_bounds.get('minPrice', 0)
-    padding = price_range * 0.1
-    display_max = chart_bounds.get('maxPrice', 100) + padding
-    display_min = chart_bounds.get('minPrice', 0) - padding
+    display_max = canvas_dimensions.get('priceMax')
+    display_min = canvas_dimensions.get('priceMin')
+    
+    if display_max is None or display_min is None:
+        price_range = chart_bounds.get('maxPrice', 100) - chart_bounds.get('minPrice', 0)
+        padding = price_range * 0.1
+        display_max = chart_bounds.get('maxPrice', 100) + padding
+        display_min = chart_bounds.get('minPrice', 0) - padding
+    
+    if display_max <= display_min:
+        display_max = display_min + 10
     
     timeframe_intervals = {
         'hourly': {'count': 60, 'delta': timedelta(minutes=1)},
@@ -216,7 +226,9 @@ def submit_prediction():
                 closest_point = point
         
         if closest_point:
-            y_normalized = 1 - (closest_point['y'] / canvas_height)
+            clamped_y = max(0, min(closest_point['y'], drawable_height))
+            y_normalized = 1 - (clamped_y / drawable_height)
+            y_normalized = max(0, min(1, y_normalized))
             price = display_min + y_normalized * (display_max - display_min)
         else:
             price = chart_bounds.get('lastPrice', 0)
