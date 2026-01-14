@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, memo } from 'react'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -53,6 +53,8 @@ function PriceChart({ data, symbol, timeframe, displayBounds }) {
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
+    animation: false,
+    resizeDelay: 0,
     interaction: {
       mode: 'index',
       intersect: false
@@ -143,4 +145,4 @@ function PriceChart({ data, symbol, timeframe, displayBounds }) {
   )
 }
 
-export default PriceChart
+export default memo(PriceChart)
