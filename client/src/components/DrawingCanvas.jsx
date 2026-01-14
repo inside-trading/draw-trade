@@ -25,7 +25,18 @@ function formatDate(date, format, timeframe) {
   }
 }
 
-function DrawingCanvas({ enabled, chartBounds, displayBounds, averagePrediction, onSubmit, timeframe }) {
+function DrawingCanvas({ 
+  enabled, 
+  chartBounds, 
+  displayBounds, 
+  averagePrediction, 
+  onSubmit, 
+  timeframe,
+  isAuthenticated = false,
+  userTokenBalance = 0,
+  stakedTokens = 0,
+  onStakeChange
+}) {
   const canvasRef = useRef(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [drawnPoints, setDrawnPoints] = useState([])
@@ -242,6 +253,12 @@ function DrawingCanvas({ enabled, chartBounds, displayBounds, averagePrediction,
     draw({ clientX: touch.clientX, clientY: touch.clientY })
   }
 
+  const handleStakeChange = (value) => {
+    const numValue = parseInt(value) || 0
+    const maxStake = Math.min(userTokenBalance, 10000)
+    onStakeChange?.(Math.max(0, Math.min(numValue, maxStake)))
+  }
+
   return (
     <div className="drawing-canvas-container">
       <div className="canvas-controls">
@@ -252,12 +269,30 @@ function DrawingCanvas({ enabled, chartBounds, displayBounds, averagePrediction,
         >
           Clear
         </button>
+        
+        {isAuthenticated && (
+          <div className="stake-input-group">
+            <label>Stake:</label>
+            <input
+              type="number"
+              value={stakedTokens || ''}
+              onChange={(e) => handleStakeChange(e.target.value)}
+              placeholder="0"
+              min="0"
+              max={userTokenBalance}
+              className="stake-input"
+              disabled={!enabled || submitting}
+            />
+            <span className="stake-max">/ {userTokenBalance.toLocaleString()}</span>
+          </div>
+        )}
+        
         <button 
           className="canvas-btn submit" 
           onClick={handleSubmit}
           disabled={drawnPoints.length < 2 || submitting || !enabled}
         >
-          {submitting ? 'Submitting...' : 'Submit Prediction'}
+          {submitting ? 'Submitting...' : stakedTokens > 0 ? `Stake ${stakedTokens} & Submit` : 'Submit Prediction'}
         </button>
       </div>
       

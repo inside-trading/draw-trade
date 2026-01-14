@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import SearchBar from './components/SearchBar'
 import PriceChart from './components/PriceChart'
 import DrawingCanvas from './components/DrawingCanvas'
+import AuthHeader from './components/AuthHeader'
+import PredictionsTable from './components/PredictionsTable'
+import { useAuth } from './hooks/useAuth'
 import axios from 'axios'
 
 const TIMEFRAMES = [
@@ -13,6 +16,7 @@ const TIMEFRAMES = [
 ]
 
 function App() {
+  const { user, isLoading: authLoading, isAuthenticated, refetch: refetchAuth } = useAuth()
   const [selectedAsset, setSelectedAsset] = useState(null)
   const [timeframe, setTimeframe] = useState('daily')
   const [priceData, setPriceData] = useState([])
@@ -25,6 +29,8 @@ function App() {
   const [sentimentSlider, setSentimentSlider] = useState(50)
   const [customMin, setCustomMin] = useState('')
   const [customMax, setCustomMax] = useState('')
+  const [stakedTokens, setStakedTokens] = useState(0)
+  const [predictionsTableKey, setPredictionsTableKey] = useState(0)
 
   const displayBounds = useMemo(() => {
     if (!chartBounds) return null
@@ -124,13 +130,18 @@ function App() {
     try {
       const response = await axios.post('/api/predictions', {
         symbol: selectedAsset.symbol,
+        assetName: selectedAsset.name,
         timeframe: timeframe,
         points: drawnPoints,
         chartBounds: chartBounds,
-        canvasDimensions: canvasDimensions
-      })
+        canvasDimensions: canvasDimensions,
+        stakedTokens: stakedTokens
+      }, { withCredentials: true })
       
       await fetchPredictions(selectedAsset.symbol, timeframe)
+      setPredictionsTableKey(k => k + 1)
+      setStakedTokens(0)
+      refetchAuth()
       return response.data
     } catch (err) {
       console.error('Failed to submit prediction:', err)
@@ -138,11 +149,20 @@ function App() {
     }
   }
 
+  const handleAssetFromTable = (symbol, assetName) => {
+    setSelectedAsset({ symbol, name: assetName || symbol })
+  }
+
   return (
     <div className="app-container">
       <header className="header">
-        <h1>Draw Trade</h1>
-        <p>Draw your price predictions and see how they compare</p>
+        <div className="header-content">
+          <div className="header-text">
+            <h1>Draw Trade</h1>
+            <p>Draw your price predictions and see how they compare</p>
+          </div>
+          <AuthHeader user={user} isAuthenticated={isAuthenticated} isLoading={authLoading} />
+        </div>
       </header>
 
       <div className="controls-section">
@@ -258,6 +278,10 @@ function App() {
           averagePrediction={averagePrediction}
           onSubmit={handlePredictionSubmit}
           timeframe={timeframe}
+          isAuthenticated={isAuthenticated}
+          userTokenBalance={user?.tokenBalance || 0}
+          stakedTokens={stakedTokens}
+          onStakeChange={setStakedTokens}
         />
       </div>
 
@@ -281,6 +305,12 @@ function App() {
           </div>
         </div>
       )}
+
+      <PredictionsTable 
+        key={predictionsTableKey}
+        currentSymbol={selectedAsset?.symbol}
+        onAssetClick={handleAssetFromTable}
+      />
     </div>
   )
 }
