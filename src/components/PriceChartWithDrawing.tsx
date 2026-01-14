@@ -35,7 +35,30 @@ export default function PriceChartWithDrawing({
   const [currentPrice, setCurrentPrice] = useState<number>(0)
   const [priceRange, setPriceRange] = useState<{ min: number; max: number }>({ min: 0, max: 0 })
 
+  // Use refs to avoid stale closure issues
+  const priceDataRef = useRef<PricePoint[]>([])
+  const currentPriceRef = useRef<number>(0)
+  const priceRangeRef = useRef<{ min: number; max: number }>({ min: 0, max: 0 })
+  const configRef = useRef(TIME_WINDOW_CONFIGS[timeWindow])
+
   const config = TIME_WINDOW_CONFIGS[timeWindow]
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    priceDataRef.current = priceData
+  }, [priceData])
+
+  useEffect(() => {
+    currentPriceRef.current = currentPrice
+  }, [currentPrice])
+
+  useEffect(() => {
+    priceRangeRef.current = priceRange
+  }, [priceRange])
+
+  useEffect(() => {
+    configRef.current = config
+  }, [config])
 
   // Generate price data when asset or time window changes
   useEffect(() => {
@@ -185,8 +208,8 @@ export default function PriceChartWithDrawing({
     }
   }, [asset.symbol, timeWindow])
 
-  // Convert drawing to price series
-  const convertDrawingToPrices = useCallback((points: { x: number; y: number }[], lastPriceTime?: number): PredictionPoint[] => {
+  // Convert drawing to price series - uses refs to avoid stale closures
+  const convertDrawingToPrices = useCallback((points: { x: number; y: number }[], baseTimeOverride?: number): PredictionPoint[] => {
     if (points.length < 2) return []
 
     const canvas = drawingCanvasRef.current
@@ -197,11 +220,15 @@ export default function PriceChartWithDrawing({
 
     if (canvasWidth === 0 || canvasHeight === 0) return []
 
-    const intervalSeconds = config.intervalMs / 1000
+    // Use refs to get current values
+    const currentConfig = configRef.current
+    const currentPriceRange = priceRangeRef.current
 
-    // Start time should be after the last price candle
-    const baseTime = lastPriceTime ? lastPriceTime + intervalSeconds : getCurrentTime()
-    const futureEndTime = baseTime + (config.futureBars * intervalSeconds)
+    const intervalSeconds = currentConfig.intervalMs / 1000
+
+    // Use the provided base time or calculate from current time
+    const baseTime = baseTimeOverride ?? (getCurrentTime() + intervalSeconds)
+    const futureEndTime = baseTime + (currentConfig.futureBars * intervalSeconds)
 
     // Sort drawing points by x coordinate
     const sortedPoints = [...points].sort((a, b) => a.x - b.x)
@@ -215,7 +242,7 @@ export default function PriceChartWithDrawing({
 
     // Generate prediction points at regular intervals
     const predictionPoints: PredictionPoint[] = []
-    const numSamples = Math.min(config.futureBars, 200) // Limit samples for performance
+    const numSamples = Math.min(currentConfig.futureBars, 200) // Limit samples for performance
 
     for (let i = 0; i < numSamples; i++) {
       // Map sample index to drawing x position
@@ -247,7 +274,7 @@ export default function PriceChartWithDrawing({
       }
 
       // Convert Y to price (inverted because canvas Y is top-down)
-      const price = priceRange.max - (y / canvasHeight) * (priceRange.max - priceRange.min)
+      const price = currentPriceRange.max - (y / canvasHeight) * (currentPriceRange.max - currentPriceRange.min)
 
       predictionPoints.push({
         time,
@@ -267,14 +294,23 @@ export default function PriceChartWithDrawing({
     }
 
     return finalPoints
-  }, [priceRange, config])
+  }, []) // No dependencies - uses refs
 
-  // Update chart with user's drawing
+  // Update chart with user's drawing - uses refs to avoid stale closures
   const updateUserPredictionLine = useCallback((points: { x: number; y: number }[]) => {
-    if (!userLineSeriesRef.current || priceData.length === 0) return
+    if (!userLineSeriesRef.current) return
 
-    const lastPriceTime = priceData[priceData.length - 1].time
-    const predictionPoints = convertDrawingToPrices(points, lastPriceTime)
+    const currentPriceData = priceDataRef.current
+    if (currentPriceData.length === 0) return
+
+    const lastPricePoint = currentPriceData[currentPriceData.length - 1]
+    const lastPriceTime = lastPricePoint.time
+    const lastPrice = currentPriceRef.current
+    const intervalSeconds = configRef.current.intervalMs / 1000
+
+    // Calculate base time for predictions (must be strictly after last price time)
+    const baseTime = lastPriceTime + intervalSeconds
+    const predictionPoints = convertDrawingToPrices(points, baseTime)
 
     if (predictionPoints.length > 0) {
       // Build line data with connection point, ensuring strictly ascending times
@@ -283,26 +319,31 @@ export default function PriceChartWithDrawing({
       // Add connection point from last price
       lineData.push({
         time: lastPriceTime as Time,
-        value: currentPrice,
+        value: lastPrice,
       })
 
       // Add prediction points, ensuring each time is strictly greater than the last
-      let lastTime = lastPriceTime
+      let prevTime = lastPriceTime
       for (const p of predictionPoints) {
-        if (p.time > lastTime) {
+        if (p.time > prevTime) {
           lineData.push({
             time: p.time as Time,
             value: p.price,
           })
-          lastTime = p.time
+          prevTime = p.time
         }
       }
 
       if (lineData.length >= 2) {
-        userLineSeriesRef.current.setData(lineData)
+        try {
+          userLineSeriesRef.current.setData(lineData)
+        } catch (error) {
+          // Silently handle time ordering errors during real-time drawing
+          console.warn('Chart update skipped:', error)
+        }
       }
     }
-  }, [convertDrawingToPrices, priceData, currentPrice])
+  }, [convertDrawingToPrices]) // Only depends on convertDrawingToPrices which uses refs
 
   // Drawing handlers
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -365,14 +406,20 @@ export default function PriceChartWithDrawing({
     setIsDrawing(false)
     setHasDrawn(true)
 
-    // Convert drawing to price series
-    const lastPriceTime = priceData.length > 0 ? priceData[priceData.length - 1].time : undefined
-    const predictionPoints = convertDrawingToPrices(drawingPoints, lastPriceTime)
+    // Convert drawing to price series using refs for current data
+    const currentPriceData = priceDataRef.current
+    if (currentPriceData.length === 0) return
+
+    const lastPriceTime = currentPriceData[currentPriceData.length - 1].time
+    const intervalSeconds = configRef.current.intervalMs / 1000
+    const baseTime = lastPriceTime + intervalSeconds
+
+    const predictionPoints = convertDrawingToPrices(drawingPoints, baseTime)
 
     if (predictionPoints.length >= 2) {
       onPredictionComplete(predictionPoints)
     }
-  }, [isDrawing, drawingPoints, convertDrawingToPrices, onPredictionComplete, priceData])
+  }, [isDrawing, drawingPoints, convertDrawingToPrices, onPredictionComplete])
 
   const handleMouseLeave = useCallback(() => {
     if (isDrawing) {
