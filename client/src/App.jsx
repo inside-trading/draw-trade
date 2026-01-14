@@ -148,6 +148,34 @@ function App() {
 
       {error && <div className="error-message">{error}</div>}
 
+      <div className="prediction-controls">
+        <div className="sentiment-slider-container">
+          <div className="sentiment-labels">
+            <span className="bearish-label">Bearish</span>
+            <span className="sentiment-value">
+              {sentimentSlider < 30 ? 'Very Bearish' : 
+               sentimentSlider < 45 ? 'Bearish' : 
+               sentimentSlider <= 55 ? 'Neutral' : 
+               sentimentSlider <= 70 ? 'Bullish' : 'Very Bullish'}
+            </span>
+            <span className="bullish-label">Bullish</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            value={sentimentSlider}
+            onChange={(e) => setSentimentSlider(parseInt(e.target.value))}
+            className="sentiment-slider"
+            disabled={!selectedAsset || priceData.length === 0}
+          />
+          <div className="price-range-display">
+            <span>${displayBounds?.min?.toFixed(2) || '0.00'}</span>
+            <span>${displayBounds?.max?.toFixed(2) || '100.00'}</span>
+          </div>
+        </div>
+      </div>
+
       <div className="chart-section">
         <div className="price-chart-container">
           {loading && (
@@ -179,8 +207,6 @@ function App() {
           averagePrediction={averagePrediction}
           onSubmit={handlePredictionSubmit}
           timeframe={timeframe}
-          sentimentSlider={sentimentSlider}
-          onSliderChange={setSentimentSlider}
         />
       </div>
 

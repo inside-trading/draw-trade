@@ -25,7 +25,7 @@ function formatDate(date, format, timeframe) {
   }
 }
 
-function DrawingCanvas({ enabled, chartBounds, displayBounds, averagePrediction, onSubmit, timeframe, sentimentSlider, onSliderChange }) {
+function DrawingCanvas({ enabled, chartBounds, displayBounds, averagePrediction, onSubmit, timeframe }) {
   const canvasRef = useRef(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [drawnPoints, setDrawnPoints] = useState([])
@@ -42,7 +42,6 @@ function DrawingCanvas({ enabled, chartBounds, displayBounds, averagePrediction,
     const endTime = new Date(now.getTime() + config.duration)
     return { start: now, end: endTime, labels: config.labels }
   }, [timeframe])
-
 
   const getCanvasPoint = useCallback((e) => {
     const canvas = canvasRef.current
@@ -243,42 +242,8 @@ function DrawingCanvas({ enabled, chartBounds, displayBounds, averagePrediction,
     draw({ clientX: touch.clientX, clientY: touch.clientY })
   }
 
-  const getSentimentLabel = () => {
-    if (sentimentSlider < 30) return 'Very Bearish'
-    if (sentimentSlider < 45) return 'Bearish'
-    if (sentimentSlider <= 55) return 'Neutral'
-    if (sentimentSlider <= 70) return 'Bullish'
-    return 'Very Bullish'
-  }
-
   return (
     <div className="drawing-canvas-container">
-      <div className="canvas-header">
-        <h3>Draw Your Prediction</h3>
-        <p>Continue the price line from the left edge. Adjust the slider to expand upside or downside range.</p>
-      </div>
-      
-      <div className="sentiment-slider-container">
-        <div className="sentiment-labels">
-          <span className="bearish-label">Bearish</span>
-          <span className="sentiment-value">{getSentimentLabel()}</span>
-          <span className="bullish-label">Bullish</span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          value={sentimentSlider}
-          onChange={(e) => onSliderChange(parseInt(e.target.value))}
-          className="sentiment-slider"
-          disabled={!enabled}
-        />
-        <div className="price-range-display">
-          <span>${priceRange.min.toFixed(2)}</span>
-          <span>${priceRange.max.toFixed(2)}</span>
-        </div>
-      </div>
-      
       <div className="canvas-controls">
         <button 
           className="canvas-btn clear" 
