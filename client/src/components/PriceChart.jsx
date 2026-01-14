@@ -50,11 +50,20 @@ function PriceChart({ data, symbol, timeframe, displayBounds }) {
     }
   }, [data, symbol])
 
+  const boundsKey = displayBounds ? `${displayBounds.min.toFixed(2)}-${displayBounds.max.toFixed(2)}` : 'none'
+  
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
     animation: false,
-    resizeDelay: 0,
+    resizeDelay: 200,
+    transitions: {
+      active: {
+        animation: {
+          duration: 0
+        }
+      }
+    },
     interaction: {
       mode: 'index',
       intersect: false
@@ -139,8 +148,8 @@ function PriceChart({ data, symbol, timeframe, displayBounds }) {
   }
 
   return (
-    <div style={{ height: '100%', minHeight: '450px' }}>
-      <Line data={chartData} options={options} />
+    <div style={{ height: '100%', width: '100%', position: 'relative' }}>
+      <Line key={`chart-${symbol}-${boundsKey}`} data={chartData} options={options} />
     </div>
   )
 }
