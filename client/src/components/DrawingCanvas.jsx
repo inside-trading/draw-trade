@@ -272,7 +272,7 @@ function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, time
     <div className="drawing-canvas-container">
       <div className="canvas-header">
         <h3>Draw Your Prediction</h3>
-        <p>Continue the price line from the left edge</p>
+        <p>Continue the price line from the left edge. Use the inputs below to adjust the price range and Y-axis of your prediction canvas.</p>
       </div>
       
       <div className="price-range-controls">
