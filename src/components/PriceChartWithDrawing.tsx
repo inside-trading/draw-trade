@@ -186,7 +186,7 @@ export default function PriceChartWithDrawing({
   }, [asset.symbol, timeWindow])
 
   // Convert drawing to price series
-  const convertDrawingToPrices = useCallback((points: { x: number; y: number }[]): PredictionPoint[] => {
+  const convertDrawingToPrices = useCallback((points: { x: number; y: number }[], lastPriceTime?: number): PredictionPoint[] => {
     if (points.length < 2) return []
 
     const canvas = drawingCanvasRef.current
@@ -195,94 +195,112 @@ export default function PriceChartWithDrawing({
     const canvasWidth = canvas.width
     const canvasHeight = canvas.height
 
-    const now = getCurrentTime()
-    const futureEndTime = now + (config.futureBars * config.intervalMs / 1000)
-    const timeRange = futureEndTime - now
+    if (canvasWidth === 0 || canvasHeight === 0) return []
 
-    // Normalize points and convert to time/price
-    const predictionPoints: PredictionPoint[] = []
     const intervalSeconds = config.intervalMs / 1000
 
-    // Sample points at regular intervals
-    const numPoints = config.futureBars
+    // Start time should be after the last price candle
+    const baseTime = lastPriceTime ? lastPriceTime + intervalSeconds : getCurrentTime()
+    const futureEndTime = baseTime + (config.futureBars * intervalSeconds)
+
+    // Sort drawing points by x coordinate
     const sortedPoints = [...points].sort((a, b) => a.x - b.x)
 
-    for (let i = 0; i < numPoints; i++) {
-      const targetX = (i / numPoints) * canvasWidth
-      const time = Math.floor(now + (i / numPoints) * timeRange)
+    // Find the x range of the drawing
+    const minX = sortedPoints[0].x
+    const maxX = sortedPoints[sortedPoints.length - 1].x
+    const drawingWidth = maxX - minX
 
-      // Find the closest drawing point
-      let closestPoint = sortedPoints[0]
-      let minDist = Math.abs(sortedPoints[0].x - targetX)
+    if (drawingWidth < 5) return [] // Too small to be meaningful
 
-      for (const point of sortedPoints) {
-        const dist = Math.abs(point.x - targetX)
-        if (dist < minDist) {
-          minDist = dist
-          closestPoint = point
+    // Generate prediction points at regular intervals
+    const predictionPoints: PredictionPoint[] = []
+    const numSamples = Math.min(config.futureBars, 200) // Limit samples for performance
+
+    for (let i = 0; i < numSamples; i++) {
+      // Map sample index to drawing x position
+      const ratio = i / (numSamples - 1)
+      const targetX = minX + ratio * drawingWidth
+
+      // Calculate time for this point (strictly increasing)
+      const time = Math.floor(baseTime + ratio * (futureEndTime - baseTime))
+
+      // Find surrounding points for interpolation
+      let beforePoint = sortedPoints[0]
+      let afterPoint = sortedPoints[sortedPoints.length - 1]
+
+      for (let j = 0; j < sortedPoints.length - 1; j++) {
+        if (sortedPoints[j].x <= targetX && sortedPoints[j + 1].x >= targetX) {
+          beforePoint = sortedPoints[j]
+          afterPoint = sortedPoints[j + 1]
+          break
         }
       }
 
-      // Interpolate between points if needed
-      let price: number
-      const beforePoints = sortedPoints.filter(p => p.x <= targetX)
-      const afterPoints = sortedPoints.filter(p => p.x >= targetX)
-
-      if (beforePoints.length > 0 && afterPoints.length > 0) {
-        const before = beforePoints[beforePoints.length - 1]
-        const after = afterPoints[0]
-
-        if (before === after) {
-          // Convert Y to price (inverted because canvas Y is top-down)
-          price = priceRange.max - (before.y / canvasHeight) * (priceRange.max - priceRange.min)
-        } else {
-          // Linear interpolation
-          const ratio = (targetX - before.x) / (after.x - before.x)
-          const y = before.y + ratio * (after.y - before.y)
-          price = priceRange.max - (y / canvasHeight) * (priceRange.max - priceRange.min)
-        }
-      } else if (closestPoint) {
-        price = priceRange.max - (closestPoint.y / canvasHeight) * (priceRange.max - priceRange.min)
+      // Interpolate y value
+      let y: number
+      if (beforePoint.x === afterPoint.x) {
+        y = beforePoint.y
       } else {
-        continue
+        const t = (targetX - beforePoint.x) / (afterPoint.x - beforePoint.x)
+        y = beforePoint.y + t * (afterPoint.y - beforePoint.y)
       }
+
+      // Convert Y to price (inverted because canvas Y is top-down)
+      const price = priceRange.max - (y / canvasHeight) * (priceRange.max - priceRange.min)
 
       predictionPoints.push({
-        time: Math.floor(time / intervalSeconds) * intervalSeconds,
+        time,
         price: Math.round(price * 100) / 100,
       })
     }
 
-    // Remove duplicates by time
-    const uniquePoints: PredictionPoint[] = []
-    const seenTimes = new Set<number>()
+    // Ensure strictly ascending times by removing duplicates and keeping only increasing
+    const finalPoints: PredictionPoint[] = []
+    let lastTime = -1
 
     for (const point of predictionPoints) {
-      if (!seenTimes.has(point.time)) {
-        seenTimes.add(point.time)
-        uniquePoints.push(point)
+      if (point.time > lastTime) {
+        finalPoints.push(point)
+        lastTime = point.time
       }
     }
 
-    return uniquePoints.sort((a, b) => a.time - b.time)
+    return finalPoints
   }, [priceRange, config])
 
   // Update chart with user's drawing
   const updateUserPredictionLine = useCallback((points: { x: number; y: number }[]) => {
-    if (!userLineSeriesRef.current) return
+    if (!userLineSeriesRef.current || priceData.length === 0) return
 
-    const predictionPoints = convertDrawingToPrices(points)
+    const lastPriceTime = priceData[priceData.length - 1].time
+    const predictionPoints = convertDrawingToPrices(points, lastPriceTime)
 
     if (predictionPoints.length > 0) {
+      // Build line data with connection point, ensuring strictly ascending times
+      const lineData: LineData[] = []
+
       // Add connection point from last price
-      const lineData: LineData[] = [
-        { time: priceData[priceData.length - 1]?.time as Time, value: currentPrice },
-        ...predictionPoints.map(p => ({
-          time: p.time as Time,
-          value: p.price,
-        }))
-      ]
-      userLineSeriesRef.current.setData(lineData)
+      lineData.push({
+        time: lastPriceTime as Time,
+        value: currentPrice,
+      })
+
+      // Add prediction points, ensuring each time is strictly greater than the last
+      let lastTime = lastPriceTime
+      for (const p of predictionPoints) {
+        if (p.time > lastTime) {
+          lineData.push({
+            time: p.time as Time,
+            value: p.price,
+          })
+          lastTime = p.time
+        }
+      }
+
+      if (lineData.length >= 2) {
+        userLineSeriesRef.current.setData(lineData)
+      }
     }
   }, [convertDrawingToPrices, priceData, currentPrice])
 
@@ -348,12 +366,13 @@ export default function PriceChartWithDrawing({
     setHasDrawn(true)
 
     // Convert drawing to price series
-    const predictionPoints = convertDrawingToPrices(drawingPoints)
+    const lastPriceTime = priceData.length > 0 ? priceData[priceData.length - 1].time : undefined
+    const predictionPoints = convertDrawingToPrices(drawingPoints, lastPriceTime)
 
     if (predictionPoints.length >= 2) {
       onPredictionComplete(predictionPoints)
     }
-  }, [isDrawing, drawingPoints, convertDrawingToPrices, onPredictionComplete])
+  }, [isDrawing, drawingPoints, convertDrawingToPrices, onPredictionComplete, priceData])
 
   const handleMouseLeave = useCallback(() => {
     if (isDrawing) {
