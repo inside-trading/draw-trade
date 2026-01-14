@@ -49,6 +49,7 @@ The project runs two servers:
 
 ## Recent Changes
 - January 2026: Initial implementation
-- January 2026: Added customizable price axis controls (min/max inputs)
+- January 2026: Added sentiment slider (bearish/bullish) to control canvas price range
+- January 2026: Fixed price chart Y-axis to remain static when drawing
 - January 2026: Added time/date labels on horizontal axis based on timeframe
 - January 2026: Canvas left edge = current time, right edge = prediction end time

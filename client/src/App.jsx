@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import SearchBar from './components/SearchBar'
 import PriceChart from './components/PriceChart'
 import DrawingCanvas from './components/DrawingCanvas'
@@ -22,6 +22,26 @@ function App() {
   const [averagePrediction, setAveragePrediction] = useState([])
   const [predictionCount, setPredictionCount] = useState(0)
   const [chartBounds, setChartBounds] = useState(null)
+  const [sentimentSlider, setSentimentSlider] = useState(50)
+
+  const displayBounds = useMemo(() => {
+    if (!chartBounds) return null
+    
+    const currentPrice = chartBounds.lastPrice
+    const historicalRange = chartBounds.maxPrice - chartBounds.minPrice
+    const basePadding = historicalRange * 0.15
+    const extraExpansion = historicalRange * 0.35
+    
+    const sliderNormalized = (sentimentSlider - 50) / 50
+    
+    const upside = basePadding + extraExpansion * Math.max(0, sliderNormalized)
+    const downside = basePadding + extraExpansion * Math.max(0, -sliderNormalized)
+    
+    return {
+      min: Math.max(0, currentPrice - (currentPrice - chartBounds.minPrice) - downside),
+      max: currentPrice + (chartBounds.maxPrice - currentPrice) + upside
+    }
+  }, [chartBounds, sentimentSlider])
 
   const fetchPriceData = useCallback(async (symbol, tf) => {
     setLoading(true)
@@ -74,6 +94,7 @@ function App() {
     setPriceData([])
     setPredictions([])
     setAveragePrediction([])
+    setSentimentSlider(50)
   }
 
   const handleTimeframeChange = (tf) => {
@@ -139,6 +160,7 @@ function App() {
               data={priceData} 
               symbol={selectedAsset.symbol}
               timeframe={timeframe}
+              displayBounds={displayBounds}
             />
           ) : (
             <div className="no-data">
@@ -153,9 +175,12 @@ function App() {
         <DrawingCanvas 
           enabled={selectedAsset !== null && priceData.length > 0}
           chartBounds={chartBounds}
+          displayBounds={displayBounds}
           averagePrediction={averagePrediction}
           onSubmit={handlePredictionSubmit}
           timeframe={timeframe}
+          sentimentSlider={sentimentSlider}
+          onSliderChange={setSentimentSlider}
         />
       </div>
 

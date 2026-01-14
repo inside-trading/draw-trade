@@ -25,34 +25,16 @@ function formatDate(date, format, timeframe) {
   }
 }
 
-function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, timeframe }) {
+function DrawingCanvas({ enabled, chartBounds, displayBounds, averagePrediction, onSubmit, timeframe, sentimentSlider, onSliderChange }) {
   const canvasRef = useRef(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [drawnPoints, setDrawnPoints] = useState([])
   const [submitting, setSubmitting] = useState(false)
-  const [customPriceMin, setCustomPriceMin] = useState('')
-  const [customPriceMax, setCustomPriceMax] = useState('')
 
   const priceRange = useMemo(() => {
-    if (!chartBounds) return { min: 0, max: 100 }
-    
-    const range = chartBounds.maxPrice - chartBounds.minPrice
-    const padding = range * 0.1
-    const defaultMin = chartBounds.minPrice - padding
-    const defaultMax = chartBounds.maxPrice + padding
-    
-    let minVal = customPriceMin !== '' ? parseFloat(customPriceMin) : defaultMin
-    let maxVal = customPriceMax !== '' ? parseFloat(customPriceMax) : defaultMax
-    
-    if (!isFinite(minVal)) minVal = defaultMin
-    if (!isFinite(maxVal)) maxVal = defaultMax
-    
-    if (maxVal <= minVal) {
-      maxVal = minVal + Math.abs(defaultMax - defaultMin) || 10
-    }
-    
-    return { min: minVal, max: maxVal }
-  }, [chartBounds, customPriceMin, customPriceMax])
+    if (!displayBounds) return { min: 0, max: 100 }
+    return { min: displayBounds.min, max: displayBounds.max }
+  }, [displayBounds])
 
   const timeRange = useMemo(() => {
     const now = new Date()
@@ -61,10 +43,6 @@ function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, time
     return { start: now, end: endTime, labels: config.labels }
   }, [timeframe])
 
-  useEffect(() => {
-    setCustomPriceMin('')
-    setCustomPriceMax('')
-  }, [chartBounds])
 
   const getCanvasPoint = useCallback((e) => {
     const canvas = canvasRef.current
@@ -265,36 +243,39 @@ function DrawingCanvas({ enabled, chartBounds, averagePrediction, onSubmit, time
     draw({ clientX: touch.clientX, clientY: touch.clientY })
   }
 
-  const defaultMin = chartBounds ? (chartBounds.minPrice - (chartBounds.maxPrice - chartBounds.minPrice) * 0.1).toFixed(2) : '0'
-  const defaultMax = chartBounds ? (chartBounds.maxPrice + (chartBounds.maxPrice - chartBounds.minPrice) * 0.1).toFixed(2) : '100'
+  const getSentimentLabel = () => {
+    if (sentimentSlider < 30) return 'Very Bearish'
+    if (sentimentSlider < 45) return 'Bearish'
+    if (sentimentSlider <= 55) return 'Neutral'
+    if (sentimentSlider <= 70) return 'Bullish'
+    return 'Very Bullish'
+  }
 
   return (
     <div className="drawing-canvas-container">
       <div className="canvas-header">
         <h3>Draw Your Prediction</h3>
-        <p>Continue the price line from the left edge. Use the inputs below to adjust the price range and Y-axis of your prediction canvas.</p>
+        <p>Continue the price line from the left edge. Adjust the slider to expand upside or downside range.</p>
       </div>
       
-      <div className="price-range-controls">
-        <div className="price-input-group">
-          <label>Max $</label>
-          <input
-            type="number"
-            value={customPriceMax}
-            onChange={(e) => setCustomPriceMax(e.target.value)}
-            placeholder={defaultMax}
-            disabled={!enabled}
-          />
+      <div className="sentiment-slider-container">
+        <div className="sentiment-labels">
+          <span className="bearish-label">Bearish</span>
+          <span className="sentiment-value">{getSentimentLabel()}</span>
+          <span className="bullish-label">Bullish</span>
         </div>
-        <div className="price-input-group">
-          <label>Min $</label>
-          <input
-            type="number"
-            value={customPriceMin}
-            onChange={(e) => setCustomPriceMin(e.target.value)}
-            placeholder={defaultMin}
-            disabled={!enabled}
-          />
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={sentimentSlider}
+          onChange={(e) => onSliderChange(parseInt(e.target.value))}
+          className="sentiment-slider"
+          disabled={!enabled}
+        />
+        <div className="price-range-display">
+          <span>${priceRange.min.toFixed(2)}</span>
+          <span>${priceRange.max.toFixed(2)}</span>
         </div>
       </div>
       

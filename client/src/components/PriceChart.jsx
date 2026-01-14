@@ -26,7 +26,7 @@ ChartJS.register(
   Filler
 )
 
-function PriceChart({ data, symbol, timeframe }) {
+function PriceChart({ data, symbol, timeframe, displayBounds }) {
   const chartData = useMemo(() => {
     if (!data || data.length === 0) {
       return { labels: [], datasets: [] }
@@ -112,6 +112,8 @@ function PriceChart({ data, symbol, timeframe }) {
       },
       y: {
         position: 'right',
+        min: displayBounds ? displayBounds.min : undefined,
+        max: displayBounds ? displayBounds.max : undefined,
         grid: {
           color: 'rgba(45, 55, 72, 0.5)',
           drawBorder: false
@@ -124,7 +126,7 @@ function PriceChart({ data, symbol, timeframe }) {
         }
       }
     }
-  }), [symbol, timeframe])
+  }), [symbol, timeframe, displayBounds])
 
   if (!data || data.length === 0) {
     return (
