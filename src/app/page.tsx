@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
-import { Asset, TimeWindow, PredictionPoint, AveragePrediction } from '@/types'
-import AssetSearch from '@/components/AssetSearch'
+import { TimeWindow, PricePoint, DrawingPoint, Prediction } from '@/types'
 import TimeWindowSelector from '@/components/TimeWindowSelector'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -15,103 +14,140 @@ const PriceChartWithDrawing = dynamic(
 
 function ChartSkeleton() {
   return (
-    <div className="w-full h-[500px] bg-chart-bg rounded-lg border border-slate-700 animate-pulse flex items-center justify-center">
+    <div className="w-full h-[400px] bg-chart-bg rounded-lg border border-slate-700 animate-pulse flex items-center justify-center">
       <div className="text-slate-500">Loading chart...</div>
     </div>
   )
 }
 
-// Get or create session ID
-function getSessionId(): string {
+// Get or create visitor ID
+function getVisitorId(): string {
   if (typeof window === 'undefined') return ''
 
-  let sessionId = localStorage.getItem('drawTradeSessionId')
-  if (!sessionId) {
-    sessionId = uuidv4()
-    localStorage.setItem('drawTradeSessionId', sessionId)
+  let visitorId = localStorage.getItem('drawTradeVisitorId')
+  if (!visitorId) {
+    visitorId = uuidv4()
+    localStorage.setItem('drawTradeVisitorId', visitorId)
   }
-  return sessionId
-}
-
-// Domain-specific branding
-function getDomainBranding(): { name: string; tagline: string; color: string } {
-  if (typeof window === 'undefined') {
-    return { name: 'Draw Trade', tagline: 'Predict the Future', color: 'text-amber-500' }
-  }
-
-  const hostname = window.location.hostname
-
-  if (hostname.includes('doodle')) {
-    return {
-      name: 'Doodle Trade',
-      tagline: 'Sketch Your Success',
-      color: 'text-purple-500',
-    }
-  }
-  if (hostname.includes('squiggle')) {
-    return {
-      name: 'Squiggle Trade',
-      tagline: 'Scribble to Profits',
-      color: 'text-emerald-500',
-    }
-  }
-
-  return {
-    name: 'Draw Trade',
-    tagline: 'Predict the Future',
-    color: 'text-amber-500',
-  }
+  return visitorId
 }
 
 export default function Home() {
-  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null)
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>('daily')
-  const [averagePrediction, setAveragePrediction] = useState<AveragePrediction | null>(null)
-  const [predictionCount, setPredictionCount] = useState(0)
-  const [sessionId, setSessionId] = useState<string>('')
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>('24h')
+  const [priceData, setPriceData] = useState<PricePoint[]>([])
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null)
+  const [visitorId, setVisitorId] = useState<string>('')
+  const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [lastSubmitMessage, setLastSubmitMessage] = useState<string>('')
-  const [branding, setBranding] = useState(getDomainBranding())
+  const [activePrediction, setActivePrediction] = useState<Prediction | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  // Initialize session ID on client
+  // Initialize visitor ID on client
   useEffect(() => {
-    setSessionId(getSessionId())
-    setBranding(getDomainBranding())
+    setVisitorId(getVisitorId())
   }, [])
 
-  // Fetch average prediction when asset or time window changes
-  const fetchAveragePrediction = useCallback(async () => {
-    if (!selectedAsset) return
+  // Fetch historical price data
+  const fetchPriceData = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
 
     try {
-      const response = await fetch(
-        `/api/predictions?assetSymbol=${selectedAsset.symbol}&timeWindow=${timeWindow}`
-      )
+      const response = await fetch(`/api/btc/history?timeWindow=${timeWindow}`)
       const data = await response.json()
 
-      if (data.averagePrediction) {
-        setAveragePrediction(data.averagePrediction)
+      if (data.success) {
+        setPriceData(data.data)
       } else {
-        setAveragePrediction(null)
+        setError('Failed to load price data')
       }
-      setPredictionCount(data.predictionCount || 0)
-    } catch (error) {
-      console.error('Error fetching average prediction:', error)
-      setAveragePrediction(null)
-      setPredictionCount(0)
+    } catch (err) {
+      console.error('Error fetching price data:', err)
+      setError('Failed to load price data')
+    } finally {
+      setIsLoading(false)
     }
-  }, [selectedAsset, timeWindow])
+  }, [timeWindow])
 
+  // Fetch current price
+  const fetchCurrentPrice = useCallback(async () => {
+    try {
+      const response = await fetch('/api/btc/price')
+      const data = await response.json()
+
+      if (data.success) {
+        setCurrentPrice(data.price)
+      }
+    } catch (err) {
+      console.error('Error fetching current price:', err)
+    }
+  }, [])
+
+  // Fetch active prediction for visitor
+  const fetchActivePrediction = useCallback(async () => {
+    if (!visitorId) return
+
+    // For now, we'll check via the prediction endpoint
+    // In production, you'd have a dedicated endpoint
+  }, [visitorId])
+
+  // Initial data fetch
   useEffect(() => {
-    fetchAveragePrediction()
-  }, [fetchAveragePrediction])
+    fetchPriceData()
+    fetchCurrentPrice()
+  }, [fetchPriceData, fetchCurrentPrice])
+
+  // Poll for current price every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(fetchCurrentPrice, 30000)
+    return () => clearInterval(interval)
+  }, [fetchCurrentPrice])
+
+  // Poll for prediction updates if there's an active prediction
+  useEffect(() => {
+    if (!activePrediction) return
+
+    const pollPrediction = async () => {
+      try {
+        const response = await fetch(`/api/predictions/${activePrediction.id}`)
+        const data = await response.json()
+
+        if (data.success && data.prediction) {
+          setActivePrediction(data.prediction)
+
+          // Check if prediction is fully settled
+          if (data.prediction.status === 'settled') {
+            // Prediction complete - could show a summary
+          }
+        }
+      } catch (err) {
+        console.error('Error polling prediction:', err)
+      }
+    }
+
+    // Poll every 10 seconds
+    const interval = setInterval(pollPrediction, 10000)
+    return () => clearInterval(interval)
+  }, [activePrediction])
+
+  // Handle time window change
+  const handleTimeWindowChange = useCallback((window: TimeWindow) => {
+    if (activePrediction) return // Don't allow changing while prediction is active
+    setTimeWindow(window)
+  }, [activePrediction])
 
   // Handle prediction submission
-  const handlePredictionComplete = useCallback(async (points: PredictionPoint[]) => {
-    if (!selectedAsset || !sessionId || points.length < 2) return
+  const handleSubmitPrediction = useCallback(async (
+    drawingPoints: DrawingPoint[],
+    canvasWidth: number,
+    canvasHeight: number,
+    priceRangeMin: number,
+    priceRangeMax: number
+  ) => {
+    if (!visitorId || drawingPoints.length < 2) return
 
     setIsSubmitting(true)
-    setLastSubmitMessage('')
+    setError(null)
 
     try {
       const response = await fetch('/api/predictions', {
@@ -120,45 +156,36 @@ export default function Home() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          assetSymbol: selectedAsset.symbol,
+          visitorId,
           timeWindow,
-          points,
-          sessionId,
+          drawingPoints,
+          canvasWidth,
+          canvasHeight,
+          priceRangeMin,
+          priceRangeMax,
         }),
       })
 
       const data = await response.json()
 
-      if (data.success) {
-        setLastSubmitMessage('Prediction saved!')
-        // Refresh average prediction
-        await fetchAveragePrediction()
+      if (data.success && data.prediction) {
+        // Fetch the full prediction with points
+        const fullResponse = await fetch(`/api/predictions/${data.prediction.id}`)
+        const fullData = await fullResponse.json()
+
+        if (fullData.success && fullData.prediction) {
+          setActivePrediction(fullData.prediction)
+        }
       } else {
-        setLastSubmitMessage('Failed to save prediction')
+        setError(data.error || 'Failed to submit prediction')
       }
-    } catch (error) {
-      console.error('Error saving prediction:', error)
-      setLastSubmitMessage('Error saving prediction')
+    } catch (err) {
+      console.error('Error submitting prediction:', err)
+      setError('Failed to submit prediction')
     } finally {
       setIsSubmitting(false)
-      // Clear message after 3 seconds
-      setTimeout(() => setLastSubmitMessage(''), 3000)
     }
-  }, [selectedAsset, timeWindow, sessionId, fetchAveragePrediction])
-
-  // Handle asset selection
-  const handleAssetSelect = useCallback((asset: Asset) => {
-    setSelectedAsset(asset)
-    setAveragePrediction(null)
-    setPredictionCount(0)
-  }, [])
-
-  // Handle time window change
-  const handleTimeWindowChange = useCallback((window: TimeWindow) => {
-    setTimeWindow(window)
-    setAveragePrediction(null)
-    setPredictionCount(0)
-  }, [])
+  }, [visitorId, timeWindow])
 
   return (
     <main className="min-h-screen bg-background">
@@ -167,63 +194,56 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className={`text-2xl font-bold ${branding.color}`}>
-                {branding.name}
+              <h1 className="text-2xl font-bold text-amber-500">
+                Draw Trade
               </h1>
-              <p className="text-slate-400 text-sm">{branding.tagline}</p>
+              <p className="text-slate-400 text-sm">Predict Bitcoin&apos;s Future</p>
             </div>
-            <div className="flex items-center gap-4">
-              {lastSubmitMessage && (
-                <span className={`text-sm ${lastSubmitMessage.includes('Error') || lastSubmitMessage.includes('Failed') ? 'text-red-400' : 'text-green-400'}`}>
-                  {lastSubmitMessage}
-                </span>
-              )}
-              {isSubmitting && (
-                <span className="text-sm text-slate-400">Saving...</span>
-              )}
-            </div>
+            {error && (
+              <div className="text-red-400 text-sm bg-red-400/10 px-3 py-1 rounded">
+                {error}
+              </div>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Controls */}
+      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        <div className="flex flex-col md:flex-row gap-6 items-start md:items-center justify-between mb-6">
-          <AssetSearch onSelect={handleAssetSelect} selectedAsset={selectedAsset} />
-          <TimeWindowSelector selected={timeWindow} onChange={handleTimeWindowChange} />
+        {/* Time Window Selector */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-lg font-medium text-white mb-2">Historical View</h2>
+            <TimeWindowSelector
+              selected={timeWindow}
+              onChange={handleTimeWindowChange}
+              disabled={!!activePrediction}
+            />
+          </div>
+          {activePrediction && (
+            <div className="text-right">
+              <span className="text-slate-400 text-sm">Prediction Status</span>
+              <div className={`text-lg font-medium ${
+                activePrediction.status === 'settled' ? 'text-emerald-500' : 'text-amber-500'
+              }`}>
+                {activePrediction.status === 'settled' ? 'Settled' : 'Active'}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Chart Area */}
-        {selectedAsset ? (
-          <PriceChartWithDrawing
-            asset={selectedAsset}
-            timeWindow={timeWindow}
-            onPredictionComplete={handlePredictionComplete}
-            averagePrediction={averagePrediction}
-            predictionCount={predictionCount}
-          />
+        {isLoading ? (
+          <ChartSkeleton />
         ) : (
-          <div className="w-full h-[500px] bg-chart-bg rounded-lg border border-slate-700 flex items-center justify-center">
-            <div className="text-center">
-              <svg
-                className="w-16 h-16 mx-auto mb-4 text-slate-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"
-                />
-              </svg>
-              <h2 className="text-xl font-medium text-white mb-2">Select an Asset</h2>
-              <p className="text-slate-400">
-                Search for a stock, crypto, or commodity to start predicting
-              </p>
-            </div>
-          </div>
+          <PriceChartWithDrawing
+            timeWindow={timeWindow}
+            priceData={priceData}
+            onSubmitPrediction={handleSubmitPrediction}
+            isSubmitting={isSubmitting}
+            activePrediction={activePrediction}
+            currentPrice={currentPrice}
+          />
         )}
 
         {/* Instructions */}
@@ -233,10 +253,10 @@ export default function Home() {
               <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold">
                 1
               </div>
-              <h3 className="font-medium text-white">Select Asset</h3>
+              <h3 className="font-medium text-white">Choose Timeframe</h3>
             </div>
             <p className="text-slate-400 text-sm">
-              Search for any NASDAQ or NYSE stock, or choose Bitcoin, Ethereum, Gold, or Silver.
+              Select how much historical data to view. Your prediction window scales accordingly.
             </p>
           </div>
 
@@ -245,10 +265,10 @@ export default function Home() {
               <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold">
                 2
               </div>
-              <h3 className="font-medium text-white">Choose Timeframe</h3>
+              <h3 className="font-medium text-white">Draw Prediction</h3>
             </div>
             <p className="text-slate-400 text-sm">
-              Select hourly, daily, weekly, monthly, or yearly predictions based on your outlook.
+              Draw your prediction on the canvas. The closer you predict, the higher your score.
             </p>
           </div>
 
@@ -257,12 +277,27 @@ export default function Home() {
               <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500 font-bold">
                 3
               </div>
-              <h3 className="font-medium text-white">Draw Prediction</h3>
+              <h3 className="font-medium text-white">Watch Results</h3>
             </div>
             <p className="text-slate-400 text-sm">
-              Draw your price prediction on the canvas. See the crowd average in grey for guidance.
+              Your score increases as the actual price matches your prediction. Check back to see results!
             </p>
           </div>
+        </div>
+
+        {/* Scoring Explanation */}
+        <div className="mt-8 bg-slate-800/30 rounded-lg p-6 border border-slate-700">
+          <h3 className="text-lg font-medium text-white mb-3">How Scoring Works</h3>
+          <p className="text-slate-400 text-sm mb-4">
+            Your prediction is converted into price points at regular intervals. As time passes,
+            we compare your predicted price to the actual Bitcoin price at each point.
+          </p>
+          <div className="bg-slate-900 rounded p-4 font-mono text-sm text-slate-300">
+            Score = 1 / (predicted_price - actual_price)²
+          </div>
+          <p className="text-slate-500 text-sm mt-3">
+            The closer your prediction, the higher your score. Perfect predictions earn maximum points!
+          </p>
         </div>
       </div>
 

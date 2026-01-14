@@ -1,84 +1,51 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { createChart, IChartApi, ISeriesApi, LineData, CandlestickData, Time } from 'lightweight-charts'
-import { Asset, TimeWindow, PricePoint, PredictionPoint, AveragePrediction, TIME_WINDOW_CONFIGS } from '@/types'
-import { generateHistoricalPrices, formatPrice, getCurrentTime } from '@/lib/data/prices'
+import { createChart, IChartApi, ISeriesApi, LineData, Time } from 'lightweight-charts'
+import { TimeWindow, PricePoint, DrawingPoint, TIME_WINDOW_CONFIGS, Prediction } from '@/types'
 
 interface PriceChartWithDrawingProps {
-  asset: Asset
   timeWindow: TimeWindow
-  onPredictionComplete: (points: PredictionPoint[]) => void
-  averagePrediction: AveragePrediction | null
-  predictionCount: number
+  priceData: PricePoint[]
+  onSubmitPrediction: (drawingPoints: DrawingPoint[], canvasWidth: number, canvasHeight: number, priceMin: number, priceMax: number) => void
+  isSubmitting: boolean
+  activePrediction: Prediction | null
+  currentPrice: number | null
 }
 
 export default function PriceChartWithDrawing({
-  asset,
   timeWindow,
-  onPredictionComplete,
-  averagePrediction,
-  predictionCount,
+  priceData,
+  onSubmitPrediction,
+  isSubmitting,
+  activePrediction,
+  currentPrice,
 }: PriceChartWithDrawingProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const canvasContainerRef = useRef<HTMLDivElement>(null)
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
-  const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
-  const avgLineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
-  const userLineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const priceSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const predictionSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
+  const actualSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
 
-  const [priceData, setPriceData] = useState<PricePoint[]>([])
   const [isDrawing, setIsDrawing] = useState(false)
-  const [drawingPoints, setDrawingPoints] = useState<{ x: number; y: number }[]>([])
+  const [drawingPoints, setDrawingPoints] = useState<DrawingPoint[]>([])
   const [hasDrawn, setHasDrawn] = useState(false)
-  const [currentPrice, setCurrentPrice] = useState<number>(0)
   const [priceRange, setPriceRange] = useState<{ min: number; max: number }>({ min: 0, max: 0 })
-
-  // Use refs to avoid stale closure issues
-  const priceDataRef = useRef<PricePoint[]>([])
-  const currentPriceRef = useRef<number>(0)
-  const priceRangeRef = useRef<{ min: number; max: number }>({ min: 0, max: 0 })
-  const configRef = useRef(TIME_WINDOW_CONFIGS[timeWindow])
 
   const config = TIME_WINDOW_CONFIGS[timeWindow]
 
-  // Keep refs in sync with state
+  // Calculate price range from data
   useEffect(() => {
-    priceDataRef.current = priceData
-  }, [priceData])
-
-  useEffect(() => {
-    currentPriceRef.current = currentPrice
-  }, [currentPrice])
-
-  useEffect(() => {
-    priceRangeRef.current = priceRange
-  }, [priceRange])
-
-  useEffect(() => {
-    configRef.current = config
-  }, [config])
-
-  // Generate price data when asset or time window changes
-  useEffect(() => {
-    const data = generateHistoricalPrices(asset.symbol, timeWindow)
-    setPriceData(data)
-    setHasDrawn(false)
-    setDrawingPoints([])
-
-    if (data.length > 0) {
-      const lastPrice = data[data.length - 1].close
-      setCurrentPrice(lastPrice)
-
-      // Calculate price range with padding
-      const prices = data.flatMap(d => [d.high, d.low])
+    if (priceData.length > 0) {
+      const prices = priceData.map(d => d.price)
       const min = Math.min(...prices)
       const max = Math.max(...prices)
-      const padding = (max - min) * 0.3
+      const padding = (max - min) * 0.2
       setPriceRange({ min: min - padding, max: max + padding })
     }
-  }, [asset.symbol, timeWindow])
+  }, [priceData])
 
   // Initialize chart
   useEffect(() => {
@@ -86,7 +53,7 @@ export default function PriceChartWithDrawing({
 
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 500,
+      height: 400,
       layout: {
         background: { color: '#0f172a' },
         textColor: '#94a3b8',
@@ -110,35 +77,33 @@ export default function PriceChartWithDrawing({
 
     chartRef.current = chart
 
-    // Add candlestick series
-    const candlestickSeries = chart.addCandlestickSeries({
-      upColor: '#10b981',
-      downColor: '#ef4444',
-      borderUpColor: '#10b981',
-      borderDownColor: '#ef4444',
-      wickUpColor: '#10b981',
-      wickDownColor: '#ef4444',
+    // Historical price line (blue)
+    const priceSeries = chart.addLineSeries({
+      color: '#3b82f6',
+      lineWidth: 2,
+      crosshairMarkerVisible: true,
+      priceLineVisible: false,
     })
-    candlestickSeriesRef.current = candlestickSeries
+    priceSeriesRef.current = priceSeries
 
-    // Add average prediction line series (grey)
-    const avgLineSeries = chart.addLineSeries({
-      color: '#6b7280',
+    // User prediction line (amber)
+    const predictionSeries = chart.addLineSeries({
+      color: '#f59e0b',
+      lineWidth: 3,
+      crosshairMarkerVisible: false,
+      priceLineVisible: false,
+    })
+    predictionSeriesRef.current = predictionSeries
+
+    // Actual price line for settled points (green)
+    const actualSeries = chart.addLineSeries({
+      color: '#10b981',
       lineWidth: 2,
       lineStyle: 2, // Dashed
       crosshairMarkerVisible: false,
       priceLineVisible: false,
     })
-    avgLineSeriesRef.current = avgLineSeries
-
-    // Add user prediction line series (amber)
-    const userLineSeries = chart.addLineSeries({
-      color: '#f59e0b',
-      lineWidth: 3,
-      crosshairMarkerVisible: true,
-      priceLineVisible: false,
-    })
-    userLineSeriesRef.current = userLineSeries
+    actualSeriesRef.current = actualSeries
 
     // Handle resize
     const handleResize = () => {
@@ -154,24 +119,21 @@ export default function PriceChartWithDrawing({
     }
   }, [])
 
-  // Update chart data
+  // Update chart with price data
   useEffect(() => {
-    if (!candlestickSeriesRef.current || priceData.length === 0) return
+    if (!priceSeriesRef.current || priceData.length === 0) return
 
-    const candleData: CandlestickData[] = priceData.map(p => ({
+    const lineData: LineData[] = priceData.map(p => ({
       time: p.time as Time,
-      open: p.open,
-      high: p.high,
-      low: p.low,
-      close: p.close,
+      value: p.price,
     }))
 
-    candlestickSeriesRef.current.setData(candleData)
+    priceSeriesRef.current.setData(lineData)
 
-    // Extend time scale to show future area
-    if (chartRef.current) {
+    // Extend visible range to include prediction area
+    if (chartRef.current && priceData.length > 0) {
       const lastTime = priceData[priceData.length - 1].time
-      const futureTime = lastTime + (config.futureBars * config.intervalMs / 1000)
+      const futureTime = lastTime + (config.predictionDuration / 1000)
       chartRef.current.timeScale().setVisibleRange({
         from: priceData[0].time as Time,
         to: futureTime as Time,
@@ -179,174 +141,61 @@ export default function PriceChartWithDrawing({
     }
   }, [priceData, config])
 
-  // Update average prediction line
+  // Update chart with active prediction
   useEffect(() => {
-    if (!avgLineSeriesRef.current) return
+    if (!predictionSeriesRef.current || !actualSeriesRef.current) return
 
-    if (averagePrediction && averagePrediction.points.length > 0) {
-      const lineData: LineData[] = averagePrediction.points.map(p => ({
-        time: p.time as Time,
-        value: p.price,
+    if (activePrediction) {
+      // Show predicted line
+      const predictionData: LineData[] = activePrediction.points.map(p => ({
+        time: (p.timestamp / 1000) as Time,
+        value: p.predictedPrice,
       }))
-      avgLineSeriesRef.current.setData(lineData)
-    } else {
-      avgLineSeriesRef.current.setData([])
-    }
-  }, [averagePrediction])
+      predictionSeriesRef.current.setData(predictionData)
 
-  // Drawing canvas setup
+      // Show actual prices for settled points
+      const settledData: LineData[] = activePrediction.points
+        .filter(p => p.actualPrice !== null)
+        .map(p => ({
+          time: (p.timestamp / 1000) as Time,
+          value: p.actualPrice!,
+        }))
+      actualSeriesRef.current.setData(settledData)
+    } else {
+      predictionSeriesRef.current.setData([])
+      actualSeriesRef.current.setData([])
+    }
+  }, [activePrediction])
+
+  // Setup drawing canvas
   useEffect(() => {
     const canvas = drawingCanvasRef.current
     if (!canvas || !canvasContainerRef.current) return
 
     canvas.width = canvasContainerRef.current.clientWidth
-    canvas.height = 500
+    canvas.height = 400
 
     const ctx = canvas.getContext('2d')
     if (ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height)
     }
-  }, [asset.symbol, timeWindow])
+  }, [timeWindow])
 
-  // Convert drawing to price series - uses refs to avoid stale closures
-  const convertDrawingToPrices = useCallback((points: { x: number; y: number }[], baseTimeOverride?: number): PredictionPoint[] => {
-    if (points.length < 2) return []
-
+  // Clear drawing when time window changes
+  useEffect(() => {
+    setDrawingPoints([])
+    setHasDrawn(false)
     const canvas = drawingCanvasRef.current
-    if (!canvas) return []
-
-    const canvasWidth = canvas.width
-    const canvasHeight = canvas.height
-
-    if (canvasWidth === 0 || canvasHeight === 0) return []
-
-    // Use refs to get current values
-    const currentConfig = configRef.current
-    const currentPriceRange = priceRangeRef.current
-
-    const intervalSeconds = currentConfig.intervalMs / 1000
-
-    // Use the provided base time or calculate from current time
-    const baseTime = baseTimeOverride ?? (getCurrentTime() + intervalSeconds)
-    const futureEndTime = baseTime + (currentConfig.futureBars * intervalSeconds)
-
-    // Sort drawing points by x coordinate
-    const sortedPoints = [...points].sort((a, b) => a.x - b.x)
-
-    // Find the x range of the drawing
-    const minX = sortedPoints[0].x
-    const maxX = sortedPoints[sortedPoints.length - 1].x
-    const drawingWidth = maxX - minX
-
-    if (drawingWidth < 5) return [] // Too small to be meaningful
-
-    // Generate prediction points at regular intervals
-    const predictionPoints: PredictionPoint[] = []
-    const numSamples = Math.min(currentConfig.futureBars, 200) // Limit samples for performance
-
-    for (let i = 0; i < numSamples; i++) {
-      // Map sample index to drawing x position
-      const ratio = i / (numSamples - 1)
-      const targetX = minX + ratio * drawingWidth
-
-      // Calculate time for this point (strictly increasing)
-      const time = Math.floor(baseTime + ratio * (futureEndTime - baseTime))
-
-      // Find surrounding points for interpolation
-      let beforePoint = sortedPoints[0]
-      let afterPoint = sortedPoints[sortedPoints.length - 1]
-
-      for (let j = 0; j < sortedPoints.length - 1; j++) {
-        if (sortedPoints[j].x <= targetX && sortedPoints[j + 1].x >= targetX) {
-          beforePoint = sortedPoints[j]
-          afterPoint = sortedPoints[j + 1]
-          break
-        }
-      }
-
-      // Interpolate y value
-      let y: number
-      if (beforePoint.x === afterPoint.x) {
-        y = beforePoint.y
-      } else {
-        const t = (targetX - beforePoint.x) / (afterPoint.x - beforePoint.x)
-        y = beforePoint.y + t * (afterPoint.y - beforePoint.y)
-      }
-
-      // Convert Y to price (inverted because canvas Y is top-down)
-      const price = currentPriceRange.max - (y / canvasHeight) * (currentPriceRange.max - currentPriceRange.min)
-
-      predictionPoints.push({
-        time,
-        price: Math.round(price * 100) / 100,
-      })
+    if (canvas) {
+      const ctx = canvas.getContext('2d')
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
     }
-
-    // Ensure strictly ascending times by removing duplicates and keeping only increasing
-    const finalPoints: PredictionPoint[] = []
-    let lastTime = -1
-
-    for (const point of predictionPoints) {
-      if (point.time > lastTime) {
-        finalPoints.push(point)
-        lastTime = point.time
-      }
-    }
-
-    return finalPoints
-  }, []) // No dependencies - uses refs
-
-  // Update chart with user's drawing - uses refs to avoid stale closures
-  const updateUserPredictionLine = useCallback((points: { x: number; y: number }[]) => {
-    if (!userLineSeriesRef.current) return
-
-    const currentPriceData = priceDataRef.current
-    if (currentPriceData.length === 0) return
-
-    const lastPricePoint = currentPriceData[currentPriceData.length - 1]
-    const lastPriceTime = lastPricePoint.time
-    const lastPrice = currentPriceRef.current
-    const intervalSeconds = configRef.current.intervalMs / 1000
-
-    // Calculate base time for predictions (must be strictly after last price time)
-    const baseTime = lastPriceTime + intervalSeconds
-    const predictionPoints = convertDrawingToPrices(points, baseTime)
-
-    if (predictionPoints.length > 0) {
-      // Build line data with connection point, ensuring strictly ascending times
-      const lineData: LineData[] = []
-
-      // Add connection point from last price
-      lineData.push({
-        time: lastPriceTime as Time,
-        value: lastPrice,
-      })
-
-      // Add prediction points, ensuring each time is strictly greater than the last
-      let prevTime = lastPriceTime
-      for (const p of predictionPoints) {
-        if (p.time > prevTime) {
-          lineData.push({
-            time: p.time as Time,
-            value: p.price,
-          })
-          prevTime = p.time
-        }
-      }
-
-      if (lineData.length >= 2) {
-        try {
-          userLineSeriesRef.current.setData(lineData)
-        } catch (error) {
-          // Silently handle time ordering errors during real-time drawing
-          console.warn('Chart update skipped:', error)
-        }
-      }
-    }
-  }, [convertDrawingToPrices]) // Only depends on convertDrawingToPrices which uses refs
+  }, [timeWindow])
 
   // Drawing handlers
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (activePrediction || isSubmitting) return
+
     const canvas = drawingCanvasRef.current
     if (!canvas) return
 
@@ -358,13 +207,11 @@ export default function PriceChartWithDrawing({
     setDrawingPoints([{ x, y }])
     setHasDrawn(false)
 
-    // Clear previous drawing
     const ctx = canvas.getContext('2d')
     if (ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height)
     }
-    userLineSeriesRef.current?.setData([])
-  }, [])
+  }, [activePrediction, isSubmitting])
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing) return
@@ -379,7 +226,6 @@ export default function PriceChartWithDrawing({
     setDrawingPoints(prev => {
       const newPoints = [...prev, { x, y }]
 
-      // Draw on canvas
       const ctx = canvas.getContext('2d')
       if (ctx && prev.length > 0) {
         ctx.strokeStyle = '#f59e0b'
@@ -393,33 +239,15 @@ export default function PriceChartWithDrawing({
         ctx.stroke()
       }
 
-      // Update chart line in real-time
-      updateUserPredictionLine(newPoints)
-
       return newPoints
     })
-  }, [isDrawing, updateUserPredictionLine])
+  }, [isDrawing])
 
   const handleMouseUp = useCallback(() => {
     if (!isDrawing) return
-
     setIsDrawing(false)
-    setHasDrawn(true)
-
-    // Convert drawing to price series using refs for current data
-    const currentPriceData = priceDataRef.current
-    if (currentPriceData.length === 0) return
-
-    const lastPriceTime = currentPriceData[currentPriceData.length - 1].time
-    const intervalSeconds = configRef.current.intervalMs / 1000
-    const baseTime = lastPriceTime + intervalSeconds
-
-    const predictionPoints = convertDrawingToPrices(drawingPoints, baseTime)
-
-    if (predictionPoints.length >= 2) {
-      onPredictionComplete(predictionPoints)
-    }
-  }, [isDrawing, drawingPoints, convertDrawingToPrices, onPredictionComplete])
+    setHasDrawn(drawingPoints.length > 10) // Need enough points
+  }, [isDrawing, drawingPoints.length])
 
   const handleMouseLeave = useCallback(() => {
     if (isDrawing) {
@@ -431,43 +259,105 @@ export default function PriceChartWithDrawing({
     const canvas = drawingCanvasRef.current
     if (canvas) {
       const ctx = canvas.getContext('2d')
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-      }
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
     }
     setDrawingPoints([])
     setHasDrawn(false)
-    userLineSeriesRef.current?.setData([])
   }, [])
+
+  const handleSubmit = useCallback(() => {
+    const canvas = drawingCanvasRef.current
+    if (!canvas || drawingPoints.length < 2) return
+
+    onSubmitPrediction(
+      drawingPoints,
+      canvas.width,
+      canvas.height,
+      priceRange.min,
+      priceRange.max
+    )
+  }, [drawingPoints, priceRange, onSubmitPrediction])
+
+  const formatPrice = (price: number) => {
+    return price.toLocaleString('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    })
+  }
+
+  const lastPrice = priceData.length > 0 ? priceData[priceData.length - 1].price : 0
+
+  // Calculate running score if there's an active prediction
+  const runningScore = activePrediction
+    ? activePrediction.points.filter(p => p.score !== null).reduce((sum, p) => sum + (p.score || 0), 0)
+    : 0
+
+  const settledCount = activePrediction
+    ? activePrediction.points.filter(p => p.actualPrice !== null).length
+    : 0
+
+  const totalCount = activePrediction?.points.length || 0
 
   return (
     <div className="w-full">
-      {/* Info bar */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-4 px-2">
         <div className="flex items-center gap-4">
-          <span className="text-2xl font-bold text-white">{asset.symbol}</span>
-          <span className="text-xl text-slate-300">{formatPrice(currentPrice, asset.symbol)}</span>
+          <span className="text-3xl font-bold text-orange-500">₿</span>
+          <span className="text-2xl font-bold text-white">Bitcoin</span>
+          <span className="text-xl text-slate-300">{formatPrice(currentPrice || lastPrice)}</span>
         </div>
-        <div className="flex items-center gap-4 text-sm">
-          {predictionCount > 0 && (
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-0.5 bg-gray-500"></div>
-              <span className="text-slate-400">{predictionCount} predictions</span>
-            </div>
-          )}
-          {hasDrawn && (
-            <button
-              onClick={clearDrawing}
-              className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 transition-colors"
-            >
-              Clear Drawing
-            </button>
+        <div className="flex items-center gap-4">
+          {hasDrawn && !activePrediction && (
+            <>
+              <button
+                onClick={clearDrawing}
+                className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 transition-colors"
+              >
+                Clear
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 rounded font-medium text-black transition-colors disabled:opacity-50"
+              >
+                {isSubmitting ? 'Submitting...' : 'Submit Prediction'}
+              </button>
+            </>
           )}
         </div>
       </div>
 
+      {/* Score Display for Active Prediction */}
+      {activePrediction && (
+        <div className="mb-4 p-4 bg-slate-800 rounded-lg border border-slate-700">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-slate-400 text-sm">Running Score</span>
+              <div className="text-2xl font-bold text-amber-500">
+                {runningScore.toFixed(2)}
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-slate-400 text-sm">Progress</span>
+              <div className="text-lg text-slate-300">
+                {settledCount} / {totalCount} points settled
+              </div>
+            </div>
+          </div>
+          <div className="mt-2 bg-slate-700 rounded-full h-2">
+            <div
+              className="bg-amber-500 h-2 rounded-full transition-all duration-500"
+              style={{ width: `${totalCount > 0 ? (settledCount / totalCount) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Chart and Drawing Canvas */}
-      <div className="relative chart-container overflow-hidden">
+      <div className="relative chart-container overflow-hidden rounded-lg border border-slate-700">
         <div className="flex">
           {/* Price Chart */}
           <div ref={chartContainerRef} className="flex-1" style={{ minWidth: '60%' }} />
@@ -480,15 +370,15 @@ export default function PriceChartWithDrawing({
           >
             <canvas
               ref={drawingCanvasRef}
-              className="drawing-canvas absolute inset-0"
+              className={`absolute inset-0 ${activePrediction ? 'cursor-not-allowed' : 'cursor-crosshair'}`}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseLeave}
             />
 
-            {/* Drawing instructions overlay */}
-            {!hasDrawn && !isDrawing && (
+            {/* Overlay message */}
+            {!hasDrawn && !isDrawing && !activePrediction && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="text-center p-6 bg-slate-800/80 rounded-lg backdrop-blur-sm">
                   <svg
@@ -504,19 +394,32 @@ export default function PriceChartWithDrawing({
                       d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
                     />
                   </svg>
-                  <p className="text-white font-medium">Draw your price prediction</p>
+                  <p className="text-white font-medium">Draw your prediction</p>
                   <p className="text-slate-400 text-sm mt-1">
-                    Click and drag to predict the {config.label.toLowerCase()} price movement
+                    Predict Bitcoin over the next {config.label.toLowerCase()}
                   </p>
+                </div>
+              </div>
+            )}
+
+            {activePrediction && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="text-center p-6 bg-slate-800/80 rounded-lg backdrop-blur-sm">
+                  <div className="animate-pulse">
+                    <p className="text-amber-500 font-medium text-lg">Prediction Active</p>
+                    <p className="text-slate-400 text-sm mt-1">
+                      Watching for results...
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
 
             {/* Price scale reference */}
             <div className="absolute right-2 top-2 bottom-2 flex flex-col justify-between text-xs text-slate-500 pointer-events-none">
-              <span>{formatPrice(priceRange.max, asset.symbol)}</span>
-              <span>{formatPrice((priceRange.max + priceRange.min) / 2, asset.symbol)}</span>
-              <span>{formatPrice(priceRange.min, asset.symbol)}</span>
+              <span>{formatPrice(priceRange.max)}</span>
+              <span>{formatPrice((priceRange.max + priceRange.min) / 2)}</span>
+              <span>{formatPrice(priceRange.min)}</span>
             </div>
           </div>
         </div>
@@ -525,13 +428,17 @@ export default function PriceChartWithDrawing({
       {/* Legend */}
       <div className="flex items-center gap-6 mt-4 px-2 text-sm">
         <div className="flex items-center gap-2">
-          <div className="w-4 h-1 bg-amber-500 rounded"></div>
+          <div className="w-4 h-0.5 bg-blue-500"></div>
+          <span className="text-slate-400">Historical Price</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-0.5 bg-amber-500"></div>
           <span className="text-slate-400">Your Prediction</span>
         </div>
-        {predictionCount > 0 && (
+        {activePrediction && (
           <div className="flex items-center gap-2">
-            <div className="w-4 h-0.5 bg-gray-500" style={{ borderTop: '2px dashed #6b7280' }}></div>
-            <span className="text-slate-400">Community Average</span>
+            <div className="w-4 h-0.5 bg-emerald-500" style={{ borderTop: '2px dashed #10b981' }}></div>
+            <span className="text-slate-400">Actual Price</span>
           </div>
         )}
       </div>
