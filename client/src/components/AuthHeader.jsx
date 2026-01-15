@@ -38,7 +38,7 @@ export default function AuthHeader({ user, isAuthenticated, isLoading }) {
 
   return (
     <div className="auth-header">
-      <a href="/auth/login" className="auth-button login-button">
+      <a href="/auth/replit_auth" className="auth-button login-button">
         Log In
       </a>
     </div>
