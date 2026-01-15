@@ -22,7 +22,16 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1, x_prefix=1)
 frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
 CORS(app, supports_credentials=True, origins=[frontend_url, 'http://localhost:5173', 'http://localhost:5000'])
 
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+# Handle Railway's postgres:// URL format (SQLAlchemy requires postgresql://)
+database_url = os.environ.get('DATABASE_URL')
+if database_url and database_url.startswith('postgres://'):
+    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+
+if not database_url:
+    database_url = 'sqlite:///local.db'
+    logging.warning("DATABASE_URL not set, using SQLite for local development")
+
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,
