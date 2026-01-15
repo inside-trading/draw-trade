@@ -5,7 +5,7 @@ import DrawingCanvas from './components/DrawingCanvas'
 import AuthHeader from './components/AuthHeader'
 import PredictionsTable from './components/PredictionsTable'
 import { useAuth } from './hooks/useAuth'
-import axios from 'axios'
+import api from './config/api'
 
 const TIMEFRAMES = [
   { id: 'hourly', label: 'Hourly', interval: '1m', lookback: '1d' },
@@ -18,7 +18,7 @@ const TIMEFRAMES = [
 const PRICE_POLL_INTERVAL = 30000
 
 function App() {
-  const { user, isLoading: authLoading, isAuthenticated, refetch: refetchAuth } = useAuth()
+  const { user, isLoading: authLoading, isAuthenticated, refetch: refetchAuth, login, register, logout, error: authError, clearError } = useAuth()
   const [selectedAsset, setSelectedAsset] = useState(null)
   const [timeframe, setTimeframe] = useState('daily')
   const [priceData, setPriceData] = useState([])
@@ -71,7 +71,7 @@ function App() {
     setError(null)
     try {
       const config = TIMEFRAMES.find(t => t.id === tf)
-      const response = await axios.get(`/api/prices/${symbol}`, {
+      const response = await api.get(`/api/prices/${symbol}`, {
         params: {
           interval: config.interval,
           period: config.lookback
@@ -94,7 +94,7 @@ function App() {
 
   const fetchPredictions = useCallback(async (symbol, tf) => {
     try {
-      const response = await axios.get(`/api/predictions/${symbol}`, {
+      const response = await api.get(`/api/predictions/${symbol}`, {
         params: { timeframe: tf }
       })
       setPredictions(response.data.predictions || [])
@@ -111,7 +111,7 @@ function App() {
       return
     }
     try {
-      const response = await axios.get(`/api/user/prediction/${symbol}`, {
+      const response = await api.get(`/api/user/prediction/${symbol}`, {
         params: { timeframe: tf },
         withCredentials: true
       })
@@ -135,7 +135,7 @@ function App() {
   const updateScore = useCallback(async () => {
     if (!liveScore?.predictionId || !chartBounds?.lastPrice) return
     try {
-      const response = await axios.post(`/api/predictions/${liveScore.predictionId}/score`, {
+      const response = await api.post(`/api/predictions/${liveScore.predictionId}/score`, {
         currentPrice: chartBounds.lastPrice
       })
       setLiveScore(prev => ({
@@ -192,7 +192,7 @@ function App() {
     if (!selectedAsset || drawnPoints.length === 0) return
     
     try {
-      const response = await axios.post('/api/predictions', {
+      const response = await api.post('/api/predictions', {
         symbol: selectedAsset.symbol,
         assetName: selectedAsset.name,
         timeframe: timeframe,
@@ -225,7 +225,16 @@ function App() {
             <h1>Draw Trade</h1>
             <p>Draw your price predictions and see how they compare</p>
           </div>
-          <AuthHeader user={user} isAuthenticated={isAuthenticated} isLoading={authLoading} />
+          <AuthHeader
+            user={user}
+            isAuthenticated={isAuthenticated}
+            isLoading={authLoading}
+            onLogin={login}
+            onRegister={register}
+            onLogout={logout}
+            error={authError}
+            onClearError={clearError}
+          />
         </div>
       </header>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import axios from 'axios'
+import api from '../config/api'
 
 const PRESET_ASSETS = [
   { symbol: 'BTC-USD', name: 'Bitcoin', type: 'Crypto' },
@@ -40,7 +40,7 @@ function SearchBar({ onSelect, selectedAsset }) {
 
       setLoading(true)
       try {
-        const response = await axios.get(`/api/search?q=${encodeURIComponent(query)}`)
+        const response = await api.get(`/api/search?q=${encodeURIComponent(query)}`)
         setResults(response.data.results || [])
       } catch (err) {
         console.error('Search error:', err)

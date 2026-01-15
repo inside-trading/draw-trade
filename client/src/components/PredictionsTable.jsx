@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import axios from 'axios'
+import api from '../config/api'
 
 const TIMEFRAME_LABELS = {
   hourly: 'Hourly',
@@ -41,7 +41,7 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
       if (filters.timeframe) params.timeframe = filters.timeframe
       if (filters.user_id) params.user_id = filters.user_id
       
-      const response = await axios.get('/api/predictions/all', { params })
+      const response = await api.get('/api/predictions/all', { params })
       setPredictions(response.data.predictions)
       setTotalPages(response.data.pages)
       setTotal(response.data.total)
