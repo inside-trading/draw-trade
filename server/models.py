@@ -36,3 +36,24 @@ class Prediction(db.Model):
     accuracy_score = db.Column(db.Float, nullable=True)
     rewards_earned = db.Column(db.Integer, default=0, nullable=False)
     status = db.Column(db.String(20), default='active')
+
+
+class PriceData(db.Model):
+    """Store historical price data from Twelve Data API to reduce API calls and enable offline access."""
+    __tablename__ = 'price_data'
+
+    id = db.Column(db.Integer, primary_key=True)
+    symbol = db.Column(db.String(20), nullable=False, index=True)
+    interval = db.Column(db.String(10), nullable=False)  # 1min, 5min, 15min, 1h, 1day
+    timestamp = db.Column(db.DateTime, nullable=False, index=True)
+    open = db.Column(db.Float, nullable=False)
+    high = db.Column(db.Float, nullable=False)
+    low = db.Column(db.Float, nullable=False)
+    close = db.Column(db.Float, nullable=False)
+    volume = db.Column(db.BigInteger, nullable=True)
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow)  # When we got this data
+
+    __table_args__ = (
+        db.UniqueConstraint('symbol', 'interval', 'timestamp', name='unique_price_point'),
+        db.Index('idx_symbol_interval_timestamp', 'symbol', 'interval', 'timestamp'),
+    )
