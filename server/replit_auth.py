@@ -94,6 +94,7 @@ def make_replit_blueprint(app):
         base_url=issuer_url,
         authorization_url_params={
             "prompt": "login consent",
+            "redirect_uri": redirect_url,
         },
         token_url=issuer_url + "/token",
         token_url_params={
