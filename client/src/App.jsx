@@ -4,6 +4,7 @@ import PriceChart from './components/PriceChart'
 import DrawingCanvas from './components/DrawingCanvas'
 import AuthHeader from './components/AuthHeader'
 import PredictionsTable from './components/PredictionsTable'
+import InstructionsPanel from './components/InstructionsPanel'
 import { useAuth } from './hooks/useAuth'
 import api from './config/api'
 
@@ -237,6 +238,8 @@ function App() {
           />
         </div>
       </header>
+
+      <InstructionsPanel />
 
       <div className="controls-section">
         <SearchBar onSelect={handleAssetSelect} selectedAsset={selectedAsset} />
