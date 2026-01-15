@@ -481,7 +481,7 @@ def update_prediction_score(prediction_id):
             prediction.status = 'completed'
             if prediction.staked_tokens > 0:
                 base_reward = prediction.staked_tokens
-                reward_multiplier = accuracy / 50
+                reward_multiplier = prediction.accuracy_score / 50 if prediction.accuracy_score else 0
                 rewards = int(base_reward * reward_multiplier)
                 prediction.rewards_earned = rewards
                 
