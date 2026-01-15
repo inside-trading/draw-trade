@@ -20,7 +20,21 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1, x_for=1, x_prefix=1)
 
 # Configure CORS for production
 frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:5173')
-CORS(app, supports_credentials=True, origins=[frontend_url, 'http://localhost:5173', 'http://localhost:5000'])
+allowed_origins = [
+    frontend_url,
+    'http://localhost:5173',
+    'http://localhost:5000',
+    'http://localhost:3000',
+]
+# Add Vercel preview URLs pattern
+if os.environ.get('VERCEL_URL'):
+    allowed_origins.append(f"https://{os.environ.get('VERCEL_URL')}")
+
+CORS(app,
+     supports_credentials=True,
+     origins=allowed_origins,
+     allow_headers=['Content-Type', 'Authorization'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 
 # Handle Railway's postgres:// URL format (SQLAlchemy requires postgresql://)
 database_url = os.environ.get('DATABASE_URL')
@@ -37,8 +51,12 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,
     'pool_recycle': 300,
 }
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
+# For cross-origin auth between Vercel frontend and Railway backend:
+# - SameSite=None allows cookies in cross-origin requests
+# - Secure=True is required when SameSite=None (HTTPS only)
+is_production = os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('FLASK_ENV') == 'production'
+app.config['SESSION_COOKIE_SAMESITE'] = 'None' if is_production else 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = is_production
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 
 db.init_app(app)
