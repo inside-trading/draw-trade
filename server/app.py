@@ -554,20 +554,32 @@ def update_prediction_score(prediction_id):
     progress = min(1.0, elapsed.total_seconds() / total_duration.total_seconds())
 
     if progress >= 0.01:
-        num_points_to_check = max(1, int(progress * len(price_series)))
-        num_points_to_check = min(num_points_to_check, len(price_series))
+        # Find the predicted price at the current elapsed time position
+        current_point_index = min(
+            int(progress * len(price_series)),
+            len(price_series) - 1
+        )
+        predicted_price_at_now = price_series[current_point_index]['price']
 
-        score_sum = 0.0
-        for i in range(num_points_to_check):
-            predicted_price = price_series[i]['price']
-            diff = current_price - predicted_price
-            diff_squared = diff * diff
-            if diff_squared > 0.0001:
-                score_sum += 1.0 / diff_squared
-            else:
-                score_sum += 10000.0
+        # Calculate score: 1 / (actual - predicted)²
+        diff = current_price - predicted_price_at_now
+        diff_squared = diff * diff
 
-        prediction.accuracy_score = round(score_sum, 4)
+        if diff_squared > 0.0001:
+            current_score = 1.0 / diff_squared
+        else:
+            current_score = 10000.0  # Cap for near-perfect predictions
+
+        # Accumulate score over time by averaging with previous score
+        # This gives a running average of accuracy throughout the prediction period
+        if prediction.accuracy_score is not None:
+            # Weight by progress to give more importance to recent scores
+            prediction.accuracy_score = round(
+                (prediction.accuracy_score + current_score) / 2,
+                4
+            )
+        else:
+            prediction.accuracy_score = round(current_score, 4)
 
         if progress >= 1.0 and prediction.status == 'active':
             prediction.status = 'completed'
@@ -590,7 +602,10 @@ def update_prediction_score(prediction_id):
         'accuracyScore': prediction.accuracy_score,
         'status': prediction.status,
         'rewardsEarned': prediction.rewards_earned,
-        'progress': round(progress * 100, 1)
+        'progress': round(progress * 100, 1),
+        'currentPointIndex': current_point_index if progress >= 0.01 else 0,
+        'predictedPrice': predicted_price_at_now if progress >= 0.01 else None,
+        'actualPrice': current_price
     })
 
 @app.route('/api/health')
