@@ -169,6 +169,9 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
                 <th onClick={() => handleSort('staked_tokens')}>
                   Staked <SortIcon column="staked_tokens" />
                 </th>
+                <th onClick={() => handleSort('accuracy_score')}>
+                  Score <SortIcon column="accuracy_score" />
+                </th>
                 <th onClick={() => handleSort('created_at')}>
                   Date <SortIcon column="created_at" />
                 </th>
@@ -195,6 +198,7 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
                       {change.value}
                     </td>
                     <td>{pred.stakedTokens > 0 ? pred.stakedTokens.toLocaleString() : '-'}</td>
+                    <td className="score-cell">{pred.accuracyScore !== null ? pred.accuracyScore.toFixed(2) : '-'}</td>
                     <td className="date-cell">{formatDate(pred.createdAt)}</td>
                   </tr>
                 )

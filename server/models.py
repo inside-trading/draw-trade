@@ -5,7 +5,7 @@ from sqlalchemy import UniqueConstraint
 
 from db import db
 
-DEFAULT_TOKEN_BALANCE = 1000
+DEFAULT_TOKEN_BALANCE = 100
 
 class User(UserMixin, db.Model):
     __tablename__ = 'users'

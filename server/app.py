@@ -266,17 +266,19 @@ def submit_prediction():
     if not symbol or not points or len(points) < 2:
         return jsonify({'error': 'Invalid prediction data'}), 400
     
-    user_id = None
-    user_balance = None
-    if current_user.is_authenticated:
-        user_id = current_user.id
-        user = User.query.get(current_user.id)
-        if staked_tokens > 0:
-            if user.token_balance < staked_tokens:
-                return jsonify({'error': 'Insufficient token balance'}), 400
-            user.token_balance -= staked_tokens
-            db.session.add(user)
-        user_balance = user.token_balance
+    if not current_user.is_authenticated:
+        return jsonify({'error': 'You must be logged in to submit predictions'}), 401
+    
+    if staked_tokens < 1:
+        return jsonify({'error': 'Minimum stake is 1 token'}), 400
+    
+    user_id = current_user.id
+    user = User.query.get(current_user.id)
+    if user.token_balance < staked_tokens:
+        return jsonify({'error': 'Insufficient token balance'}), 400
+    user.token_balance -= staked_tokens
+    db.session.add(user)
+    user_balance = user.token_balance
     
     canvas_height = canvas_dimensions.get('height', 400)
     bottom_padding = canvas_dimensions.get('bottomPadding', 30)
@@ -457,23 +459,20 @@ def update_prediction_score(prediction_id):
     progress = min(1.0, elapsed.total_seconds() / total_duration.total_seconds())
     
     if progress >= 0.01:
-        expected_index = int(progress * (len(price_series) - 1))
-        expected_index = min(expected_index, len(price_series) - 1)
-        expected_price = price_series[expected_index]['price']
+        num_points_to_check = max(1, int(progress * len(price_series)))
+        num_points_to_check = min(num_points_to_check, len(price_series))
         
-        prediction_direction = 1 if expected_price > prediction.start_price else -1
-        actual_direction = 1 if current_price > prediction.start_price else -1
-        direction_correct = prediction_direction == actual_direction
+        score_sum = 0.0
+        for i in range(num_points_to_check):
+            predicted_price = price_series[i]['price']
+            diff = current_price - predicted_price
+            diff_squared = diff * diff
+            if diff_squared > 0.0001:
+                score_sum += 1.0 / diff_squared
+            else:
+                score_sum += 10000.0
         
-        price_diff_percent = abs(expected_price - current_price) / prediction.start_price * 100
-        accuracy = max(0, 100 - price_diff_percent * 2)
-        
-        if direction_correct:
-            accuracy = min(100, accuracy + 20)
-        else:
-            accuracy = max(0, accuracy - 20)
-        
-        prediction.accuracy_score = round(accuracy, 2)
+        prediction.accuracy_score = round(score_sum, 4)
         
         if progress >= 1.0 and prediction.status == 'active':
             prediction.status = 'completed'

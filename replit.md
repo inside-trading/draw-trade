@@ -79,7 +79,7 @@ The project runs two servers:
 - January 2026: Canvas left edge = current time, right edge = prediction end time
 - January 2026: Added exact Min/Max price text inputs for precise predictions
 - January 2026: Added Replit OAuth authentication system
-- January 2026: Created User model with token balance (default 1000 tokens)
+- January 2026: Created User model with token balance (default 100 tokens)
 - January 2026: Added token staking on predictions
 - January 2026: Created community predictions table with sorting/filtering
 - January 2026: Added processed prediction line display (purple) after submission
