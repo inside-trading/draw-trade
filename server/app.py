@@ -11,8 +11,9 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 from db import db
-from models import User, Prediction
+from models import User, Prediction, PriceData
 from auth import auth_bp, init_auth, require_login
+import twelve_data
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", os.urandom(24).hex())
@@ -123,37 +124,112 @@ def search_assets():
 def get_prices(symbol):
     interval = request.args.get('interval', '5m')
     period = request.args.get('period', '5d')
+    source = request.args.get('source', 'auto')  # 'auto', 'twelve_data', 'yfinance'
 
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period, interval=interval)
+    # Map period to approximate outputsize for Twelve Data
+    period_to_outputsize = {
+        '1d': 100,      # 1 day of 1m data ~= 390 bars (market hours)
+        '5d': 500,      # 5 days
+        '1mo': 720,     # 1 month of hourly data
+        '6mo': 180,     # 6 months of daily data
+        '1y': 365,      # 1 year of daily data
+    }
+    outputsize = period_to_outputsize.get(period, 100)
 
-        if df.empty:
-            return jsonify({'error': 'No data found'}), 404
+    # Try Twelve Data first if API key is configured and source allows it
+    if source in ('auto', 'twelve_data') and twelve_data.TWELVE_DATA_API_KEY:
+        result = twelve_data.get_prices_with_cache(symbol, interval, outputsize)
+        if result.get('prices'):
+            return jsonify(result)
 
-        prices = []
-        for timestamp, row in df.iterrows():
-            prices.append({
-                'timestamp': timestamp.isoformat(),
-                'open': float(row['Open']),
-                'high': float(row['High']),
-                'low': float(row['Low']),
-                'close': float(row['Close']),
-                'volume': int(row['Volume'])
+    # Fall back to yfinance
+    if source in ('auto', 'yfinance'):
+        try:
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(period=period, interval=interval)
+
+            if df.empty:
+                return jsonify({'error': 'No data found'}), 404
+
+            prices = []
+            for timestamp, row in df.iterrows():
+                prices.append({
+                    'timestamp': timestamp.isoformat(),
+                    'open': float(row['Open']),
+                    'high': float(row['High']),
+                    'low': float(row['Low']),
+                    'close': float(row['Close']),
+                    'volume': int(row['Volume'])
+                })
+
+            closes = [p['close'] for p in prices]
+
+            return jsonify({
+                'prices': prices,
+                'minPrice': min(closes),
+                'maxPrice': max(closes),
+                'lastPrice': closes[-1] if closes else 0,
+                'lastTimestamp': prices[-1]['timestamp'] if prices else None,
+                'source': 'yfinance'
             })
 
-        closes = [p['close'] for p in prices]
+        except Exception as e:
+            logging.error(f"yfinance error for {symbol}: {e}")
+            return jsonify({'error': str(e)}), 500
 
+    return jsonify({'error': 'No data source available'}), 500
+
+
+@app.route('/api/prices/refresh/<symbol>', methods=['POST'])
+def refresh_prices(symbol):
+    """Force refresh price data from Twelve Data API."""
+    interval = request.args.get('interval', '5m')
+    outputsize = request.args.get('outputsize', 100, type=int)
+
+    if not twelve_data.TWELVE_DATA_API_KEY:
+        return jsonify({'error': 'Twelve Data API key not configured'}), 503
+
+    # Fetch fresh data from Twelve Data
+    prices = twelve_data.fetch_from_twelve_data(symbol, interval, outputsize)
+
+    if prices:
+        stored = twelve_data.store_price_data(symbol, interval, prices)
         return jsonify({
-            'prices': prices,
-            'minPrice': min(closes),
-            'maxPrice': max(closes),
-            'lastPrice': closes[-1] if closes else 0,
-            'lastTimestamp': prices[-1]['timestamp'] if prices else None
+            'success': True,
+            'message': f'Refreshed {stored} price points for {symbol}',
+            'count': stored
         })
 
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    return jsonify({'error': 'Failed to fetch price data'}), 500
+
+
+@app.route('/api/prices/stats')
+def price_stats():
+    """Get statistics about cached price data."""
+    from sqlalchemy import func
+
+    stats = db.session.query(
+        PriceData.symbol,
+        PriceData.interval,
+        func.count(PriceData.id).label('count'),
+        func.min(PriceData.timestamp).label('oldest'),
+        func.max(PriceData.timestamp).label('newest'),
+    ).group_by(PriceData.symbol, PriceData.interval).all()
+
+    result = []
+    for stat in stats:
+        result.append({
+            'symbol': stat.symbol,
+            'interval': stat.interval,
+            'count': stat.count,
+            'oldest': stat.oldest.isoformat() if stat.oldest else None,
+            'newest': stat.newest.isoformat() if stat.newest else None,
+        })
+
+    return jsonify({
+        'stats': result,
+        'twelveDataConfigured': bool(twelve_data.TWELVE_DATA_API_KEY)
+    })
 
 @app.route('/api/predictions/<symbol>')
 def get_predictions(symbol):
