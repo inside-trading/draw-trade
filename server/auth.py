@@ -1,4 +1,5 @@
 import re
+import secrets
 from functools import wraps
 from flask import Blueprint, request, jsonify
 from flask_login import LoginManager, login_user, logout_user, current_user
@@ -10,6 +11,9 @@ from models import User, DEFAULT_TOKEN_BALANCE
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 login_manager = LoginManager()
 
+# Store for auth tokens (in production, use Redis or database)
+auth_tokens = {}
+
 def init_auth(app):
     login_manager.init_app(app)
 
@@ -17,10 +21,29 @@ def init_auth(app):
 def load_user(user_id):
     return User.query.get(user_id)
 
+def get_authenticated_user():
+    """Get authenticated user from session cookie OR auth token header."""
+    # First try session-based auth
+    if current_user.is_authenticated:
+        return current_user
+
+    # Fall back to token-based auth for mobile
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header[7:]
+        user_id = auth_tokens.get(token)
+        if user_id:
+            user = User.query.get(user_id)
+            if user:
+                return user
+
+    return None
+
 def require_login(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated:
+        user = get_authenticated_user()
+        if not user:
             return jsonify({'error': 'Authentication required'}), 401
         return f(*args, **kwargs)
     return decorated_function
@@ -64,8 +87,13 @@ def register():
 
     login_user(user, remember=True)
 
+    # Generate auth token for mobile/cross-origin support
+    auth_token = secrets.token_urlsafe(32)
+    auth_tokens[auth_token] = user.id
+
     return jsonify({
         'success': True,
+        'authToken': auth_token,
         'user': {
             'id': user.id,
             'email': user.email,
@@ -92,8 +120,13 @@ def login():
 
     login_user(user, remember=True)
 
+    # Generate auth token for mobile/cross-origin support
+    auth_token = secrets.token_urlsafe(32)
+    auth_tokens[auth_token] = user.id
+
     return jsonify({
         'success': True,
+        'authToken': auth_token,
         'user': {
             'id': user.id,
             'email': user.email,
@@ -110,17 +143,18 @@ def logout():
     return jsonify({'success': True})
 
 @auth_bp.route('/user')
-def get_current_user():
-    if current_user.is_authenticated:
+def get_current_user_route():
+    user = get_authenticated_user()
+    if user:
         return jsonify({
             'authenticated': True,
             'user': {
-                'id': current_user.id,
-                'email': current_user.email,
-                'firstName': current_user.first_name,
-                'lastName': current_user.last_name,
-                'profileImageUrl': current_user.profile_image_url,
-                'tokenBalance': current_user.token_balance
+                'id': user.id,
+                'email': user.email,
+                'firstName': user.first_name,
+                'lastName': user.last_name,
+                'profileImageUrl': user.profile_image_url,
+                'tokenBalance': user.token_balance
             }
         })
     return jsonify({'authenticated': False, 'user': None})

@@ -1,7 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
-import axios from 'axios'
+import api from '../config/api'
 
-const API_URL = import.meta.env.VITE_API_URL || ''
+const AUTH_TOKEN_KEY = 'draw_trade_auth_token'
+
+// Helper to get/set auth token in localStorage
+const getStoredToken = () => localStorage.getItem(AUTH_TOKEN_KEY)
+const setStoredToken = (token) => {
+  if (token) {
+    localStorage.setItem(AUTH_TOKEN_KEY, token)
+  } else {
+    localStorage.removeItem(AUTH_TOKEN_KEY)
+  }
+}
 
 export function useAuth() {
   const [user, setUser] = useState(null)
@@ -11,18 +21,20 @@ export function useAuth() {
 
   const fetchUser = useCallback(async () => {
     try {
-      const response = await axios.get(`${API_URL}/api/auth/user`, { withCredentials: true })
+      const response = await api.get('/api/auth/user')
       if (response.data.authenticated) {
         setUser(response.data.user)
         setIsAuthenticated(true)
       } else {
         setUser(null)
         setIsAuthenticated(false)
+        setStoredToken(null) // Clear invalid token
       }
     } catch (error) {
       console.error('Failed to fetch user:', error)
       setUser(null)
       setIsAuthenticated(false)
+      setStoredToken(null)
     } finally {
       setIsLoading(false)
     }
@@ -35,12 +47,12 @@ export function useAuth() {
   const login = async (email, password) => {
     setError(null)
     try {
-      const response = await axios.post(
-        `${API_URL}/api/auth/login`,
-        { email, password },
-        { withCredentials: true }
-      )
+      const response = await api.post('/api/auth/login', { email, password })
       if (response.data.success) {
+        // Store the auth token for mobile/cross-origin support
+        if (response.data.authToken) {
+          setStoredToken(response.data.authToken)
+        }
         setUser(response.data.user)
         setIsAuthenticated(true)
         return { success: true }
@@ -55,12 +67,17 @@ export function useAuth() {
   const register = async (email, password, firstName, lastName) => {
     setError(null)
     try {
-      const response = await axios.post(
-        `${API_URL}/api/auth/register`,
-        { email, password, firstName, lastName },
-        { withCredentials: true }
-      )
+      const response = await api.post('/api/auth/register', {
+        email,
+        password,
+        firstName,
+        lastName
+      })
       if (response.data.success) {
+        // Store the auth token for mobile/cross-origin support
+        if (response.data.authToken) {
+          setStoredToken(response.data.authToken)
+        }
         setUser(response.data.user)
         setIsAuthenticated(true)
         return { success: true }
@@ -74,10 +91,11 @@ export function useAuth() {
 
   const logout = async () => {
     try {
-      await axios.post(`${API_URL}/api/auth/logout`, {}, { withCredentials: true })
+      await api.post('/api/auth/logout', {})
     } catch (err) {
       console.error('Logout error:', err)
     } finally {
+      setStoredToken(null)
       setUser(null)
       setIsAuthenticated(false)
     }
@@ -102,3 +120,6 @@ export function useAuth() {
     clearError
   }
 }
+
+// Export helper for other modules to get the token
+export const getAuthToken = getStoredToken
