@@ -1945,41 +1945,6 @@ body {
     padding: 8px 6px;
   }
 
-  /* Chart and drawing area mobile layout */
-  .chart-section {
-    flex-direction: column;
-    max-height: none;
-    min-height: auto;
-  }
-
-  .price-chart-container {
-    min-height: 250px;
-  }
-
-  .drawing-canvas-container {
-    width: 100%;
-    min-height: 300px;
-    border-left: none;
-    border-top: 2px solid #2d3748;
-  }
-
-  .canvas-controls {
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 8px;
-  }
-
-  .canvas-btn {
-    padding: 10px 14px;
-    font-size: 14px;
-  }
-
-  .stake-input-group {
-    flex: 1;
-    min-width: 120px;
-    justify-content: center;
-  }
-
   .controls-section {
     flex-direction: column;
     align-items: center;
@@ -2007,6 +1972,45 @@ body {
 
   .info-item {
     min-width: 80px;
+  }
+}
+
+/* Mobile landscape - keep side-by-side layout but adjust sizes */
+@media (max-width: 900px) and (orientation: landscape) {
+  .chart-section {
+    flex-direction: row;
+    min-height: 280px;
+    max-height: 350px;
+  }
+
+  .price-chart-container {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .drawing-canvas-container {
+    width: 300px;
+    min-width: 280px;
+    border-left: 2px solid #2d3748;
+    border-top: none;
+  }
+
+  .canvas-controls {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .canvas-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .stake-input-group {
+    padding: 4px 8px;
+  }
+
+  .stake-input {
+    width: 50px;
   }
 }
 
