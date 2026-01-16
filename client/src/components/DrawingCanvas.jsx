@@ -321,17 +321,29 @@ function DrawingCanvas({
     onStakeChange?.(Math.max(0, Math.min(numValue, maxStake)))
   }
 
+  // Handle button touch for mobile - prevents issues with touch-action: none on container
+  const handleButtonTouch = (e, callback) => {
+    e.preventDefault()
+    e.stopPropagation()
+    callback()
+  }
+
   return (
     <div className="drawing-canvas-container" ref={containerRef}>
       <div className="canvas-controls">
-        <button 
-          className="canvas-btn clear" 
+        <button
+          className="canvas-btn clear"
           onClick={handleClear}
+          onTouchEnd={(e) => {
+            if (drawnPoints.length > 0 && !submitting) {
+              handleButtonTouch(e, handleClear)
+            }
+          }}
           disabled={drawnPoints.length === 0 || submitting}
         >
           Clear
         </button>
-        
+
         {isAuthenticated && (
           <div className="stake-input-group">
             <label>Stake:</label>
@@ -348,10 +360,15 @@ function DrawingCanvas({
             <span className="stake-max">/ {userTokenBalance.toLocaleString()}</span>
           </div>
         )}
-        
-        <button 
-          className="canvas-btn submit" 
+
+        <button
+          className="canvas-btn submit"
           onClick={handleSubmit}
+          onTouchEnd={(e) => {
+            if (drawnPoints.length >= 2 && !submitting && enabled) {
+              handleButtonTouch(e, handleSubmit)
+            }
+          }}
           disabled={drawnPoints.length < 2 || submitting || !enabled}
         >
           {submitting ? 'Submitting...' : stakedTokens > 0 ? `Stake ${stakedTokens} & Submit` : 'Submit Prediction'}
