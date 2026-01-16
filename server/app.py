@@ -509,8 +509,9 @@ def submit_prediction():
 @app.route('/api/user/predictions')
 @require_login
 def get_user_predictions():
+    auth_user = get_authenticated_user()
     predictions = Prediction.query.filter_by(
-        user_id=current_user.id
+        user_id=auth_user.id
     ).order_by(Prediction.created_at.desc()).all()
 
     return jsonify({
@@ -534,13 +535,14 @@ def get_user_predictions():
 
 @app.route('/api/user/prediction/<symbol>')
 def get_user_latest_prediction(symbol):
-    if not current_user.is_authenticated:
+    auth_user = get_authenticated_user()
+    if not auth_user:
         return jsonify({'prediction': None})
 
     timeframe = request.args.get('timeframe', 'daily')
 
     prediction = Prediction.query.filter_by(
-        user_id=current_user.id,
+        user_id=auth_user.id,
         symbol=symbol.upper(),
         timeframe=timeframe
     ).order_by(Prediction.created_at.desc()).first()
@@ -579,8 +581,9 @@ def update_prediction_score(prediction_id):
     if not prediction:
         return jsonify({'error': 'Prediction not found'}), 404
 
-    if prediction.user_id and current_user.is_authenticated:
-        if str(prediction.user_id) != str(current_user.id):
+    auth_user = get_authenticated_user()
+    if prediction.user_id and auth_user:
+        if str(prediction.user_id) != str(auth_user.id):
             return jsonify({'error': 'Unauthorized'}), 403
 
     data = request.get_json()
@@ -711,7 +714,9 @@ def close_prediction_early(prediction_id):
     if not prediction:
         return jsonify({'error': 'Prediction not found'}), 404
 
-    if str(prediction.user_id) != str(current_user.id):
+    # Use get_authenticated_user for token-based auth support
+    auth_user = get_authenticated_user()
+    if str(prediction.user_id) != str(auth_user.id):
         return jsonify({'error': 'You can only close your own predictions'}), 403
 
     if prediction.status != 'active':
@@ -776,7 +781,7 @@ def close_prediction_early(prediction_id):
     prediction.rewards_earned = payoff
 
     # Credit user
-    user = User.query.get(current_user.id)
+    user = User.query.get(auth_user.id)
     if user:
         user.token_balance += payoff
         db.session.add(user)
@@ -849,12 +854,13 @@ def get_user_stats():
     """Get detailed statistics for the current user."""
     from sqlalchemy import func
 
-    user = User.query.get(current_user.id)
+    auth_user = get_authenticated_user()
+    user = User.query.get(auth_user.id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
 
     # Get prediction stats
-    predictions = Prediction.query.filter_by(user_id=current_user.id).all()
+    predictions = Prediction.query.filter_by(user_id=auth_user.id).all()
 
     active_predictions = [p for p in predictions if p.status == 'active']
     completed_predictions = [p for p in predictions if p.status in ('completed', 'closed')]
@@ -877,7 +883,7 @@ def get_user_stats():
     ).group_by(Prediction.user_id).all()
 
     sorted_users = sorted(all_user_mspes, key=lambda x: x.mean_mspe if x.mean_mspe else float('inf'))
-    rank = next((i + 1 for i, u in enumerate(sorted_users) if u.user_id == current_user.id), None)
+    rank = next((i + 1 for i, u in enumerate(sorted_users) if u.user_id == auth_user.id), None)
 
     # Build prediction history for chart
     prediction_history = []
@@ -921,8 +927,9 @@ def get_user_stats():
 @require_login
 def get_user_predictions_detailed():
     """Get detailed predictions for the current user with progress info."""
+    auth_user = get_authenticated_user()
     predictions = Prediction.query.filter_by(
-        user_id=current_user.id
+        user_id=auth_user.id
     ).order_by(Prediction.created_at.desc()).all()
 
     now = datetime.utcnow()
