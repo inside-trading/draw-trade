@@ -4,12 +4,11 @@ import SearchBar from './components/SearchBar'
 import PriceChart from './components/PriceChart'
 import DrawingCanvas from './components/DrawingCanvas'
 import AuthHeader from './components/AuthHeader'
-import PredictionsTable from './components/PredictionsTable'
-import InstructionsPanel from './components/InstructionsPanel'
-import ScoringPanel from './components/ScoringPanel'
 import MobileRotatePrompt from './components/MobileRotatePrompt'
 import AccountPage from './pages/AccountPage'
 import LeaderboardPage from './pages/LeaderboardPage'
+import PredictionsPage from './pages/PredictionsPage'
+import ScoringPage from './pages/ScoringPage'
 import { useAuth } from './hooks/useAuth'
 import api from './config/api'
 
@@ -38,7 +37,6 @@ function App() {
   const [customMin, setCustomMin] = useState('')
   const [customMax, setCustomMax] = useState('')
   const [stakedTokens, setStakedTokens] = useState(0)
-  const [predictionsTableKey, setPredictionsTableKey] = useState(0)
   const [userPrediction, setUserPrediction] = useState(null)
   const [liveScore, setLiveScore] = useState(null)
 
@@ -212,7 +210,6 @@ function App() {
       }, { withCredentials: true })
       
       await fetchPredictions(selectedAsset.symbol, timeframe)
-      setPredictionsTableKey(k => k + 1)
       setStakedTokens(0)
       refetchAuth()
       return response.data
@@ -220,10 +217,6 @@ function App() {
       console.error('Failed to submit prediction:', err)
       throw err
     }
-  }
-
-  const handleAssetFromTable = (symbol, assetName) => {
-    setSelectedAsset({ symbol, name: assetName || symbol })
   }
 
   return (
@@ -238,7 +231,9 @@ function App() {
           </div>
           <nav className="main-nav">
             <Link to="/" className="nav-link">Trade</Link>
+            <Link to="/predictions" className="nav-link">Predictions</Link>
             <Link to="/leaderboard" className="nav-link">Leaderboard</Link>
+            <Link to="/scoring" className="nav-link">Scoring</Link>
             {isAuthenticated && <Link to="/account" className="nav-link">Account</Link>}
           </nav>
           <AuthHeader
@@ -265,9 +260,17 @@ function App() {
         <Route path="/leaderboard" element={
           <LeaderboardPage currentUserId={user?.id} />
         } />
+        <Route path="/predictions" element={
+          <PredictionsPage
+            currentUserId={user?.id}
+            onRefreshAuth={refetchAuth}
+          />
+        } />
+        <Route path="/scoring" element={
+          <ScoringPage />
+        } />
         <Route path="/" element={
           <>
-            <InstructionsPanel />
 
       <div className="controls-section">
         <SearchBar onSelect={handleAssetSelect} selectedAsset={selectedAsset} />
@@ -422,16 +425,6 @@ function App() {
         </div>
       )}
 
-      <PredictionsTable
-        key={predictionsTableKey}
-        currentSymbol={selectedAsset?.symbol}
-        onAssetClick={handleAssetFromTable}
-        currentUserId={user?.id}
-        currentPrice={chartBounds?.lastPrice}
-        onRefreshAuth={refetchAuth}
-      />
-
-            <ScoringPanel />
           </>
         } />
       </Routes>
