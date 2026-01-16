@@ -292,6 +292,22 @@ body {
   user-select: none;
 }
 
+.submit-error {
+  position: absolute;
+  top: 45px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(229, 62, 62, 0.95);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  z-index: 15;
+  max-width: 90%;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
 .canvas-controls {
   position: absolute;
   top: 10px;
