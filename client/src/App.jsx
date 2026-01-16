@@ -7,6 +7,7 @@ import AuthHeader from './components/AuthHeader'
 import PredictionsTable from './components/PredictionsTable'
 import InstructionsPanel from './components/InstructionsPanel'
 import ScoringPanel from './components/ScoringPanel'
+import MobileRotatePrompt from './components/MobileRotatePrompt'
 import AccountPage from './pages/AccountPage'
 import LeaderboardPage from './pages/LeaderboardPage'
 import { useAuth } from './hooks/useAuth'
@@ -350,44 +351,46 @@ function App() {
         </div>
       </div>
 
-      <div className="chart-section">
-        <div className="price-chart-container">
-          {loading && (
-            <div className="loading-overlay">
-              <div className="loading-spinner"></div>
-            </div>
-          )}
-          {selectedAsset ? (
-            <PriceChart 
-              data={priceData} 
-              symbol={selectedAsset.symbol}
-              timeframe={timeframe}
-              displayBounds={displayBounds}
-            />
-          ) : (
-            <div className="no-data">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3.5 18.5l6-6 4 4L22 6.92 20.59 5.5l-7.09 8-4-4L2 17l1.5 1.5z"/>
-              </svg>
-              <p>Select an asset to view price chart</p>
-            </div>
-          )}
-        </div>
+      <MobileRotatePrompt>
+        <div className="chart-section">
+          <div className="price-chart-container">
+            {loading && (
+              <div className="loading-overlay">
+                <div className="loading-spinner"></div>
+              </div>
+            )}
+            {selectedAsset ? (
+              <PriceChart
+                data={priceData}
+                symbol={selectedAsset.symbol}
+                timeframe={timeframe}
+                displayBounds={displayBounds}
+              />
+            ) : (
+              <div className="no-data">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3.5 18.5l6-6 4 4L22 6.92 20.59 5.5l-7.09 8-4-4L2 17l1.5 1.5z"/>
+                </svg>
+                <p>Select an asset to view price chart</p>
+              </div>
+            )}
+          </div>
 
-        <DrawingCanvas 
-          enabled={selectedAsset !== null && priceData.length > 0}
-          chartBounds={chartBounds}
-          displayBounds={displayBounds}
-          averagePrediction={averagePrediction}
-          onSubmit={handlePredictionSubmit}
-          timeframe={timeframe}
-          isAuthenticated={isAuthenticated}
-          userTokenBalance={user?.tokenBalance || 0}
-          stakedTokens={stakedTokens}
-          onStakeChange={setStakedTokens}
-          userPrediction={userPrediction}
-        />
-      </div>
+          <DrawingCanvas
+            enabled={selectedAsset !== null && priceData.length > 0}
+            chartBounds={chartBounds}
+            displayBounds={displayBounds}
+            averagePrediction={averagePrediction}
+            onSubmit={handlePredictionSubmit}
+            timeframe={timeframe}
+            isAuthenticated={isAuthenticated}
+            userTokenBalance={user?.tokenBalance || 0}
+            stakedTokens={stakedTokens}
+            onStakeChange={setStakedTokens}
+            userPrediction={userPrediction}
+          />
+        </div>
+      </MobileRotatePrompt>
 
       {selectedAsset && chartBounds && (
         <div className="info-bar">
