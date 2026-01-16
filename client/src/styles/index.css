@@ -758,6 +758,119 @@ body {
   color: #8892b0;
 }
 
+/* Table Status and Action Styles */
+.status-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-active {
+  background: rgba(0, 212, 255, 0.15);
+  color: #00d4ff;
+  border: 1px solid rgba(0, 212, 255, 0.3);
+}
+
+.status-completed {
+  background: rgba(56, 161, 105, 0.15);
+  color: #48bb78;
+  border: 1px solid rgba(56, 161, 105, 0.3);
+}
+
+.status-closed {
+  background: rgba(160, 174, 192, 0.15);
+  color: #a0aec0;
+  border: 1px solid rgba(160, 174, 192, 0.3);
+}
+
+.progress-bar-container {
+  position: relative;
+  width: 60px;
+  height: 18px;
+  background: #2d3748;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #00d4ff, #7c3aed);
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.progress-complete {
+  color: #48bb78;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.progress-closed {
+  color: #a0aec0;
+  font-size: 12px;
+}
+
+.mspe-cell {
+  font-family: monospace;
+  font-size: 12px;
+  color: #a0aec0;
+}
+
+.payoff-cell {
+  font-weight: 600;
+}
+
+.payoff-final {
+  color: #48bb78;
+}
+
+.payoff-estimate {
+  color: #a0aec0;
+  font-style: italic;
+}
+
+.close-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid #e53e3e;
+  border-radius: 4px;
+  background: transparent;
+  color: #e53e3e;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.close-btn:hover:not(:disabled) {
+  background: rgba(229, 62, 62, 0.15);
+}
+
+.close-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.own-prediction {
+  background: rgba(0, 212, 255, 0.05);
+}
+
+.own-prediction:hover {
+  background: rgba(0, 212, 255, 0.1) !important;
+}
+
 .live-score {
   background: rgba(159, 122, 234, 0.15);
   padding: 8px 16px;

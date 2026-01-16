@@ -323,6 +323,32 @@ def get_all_predictions():
             if user:
                 user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.email or 'Anonymous'
 
+        # Calculate estimated payoff
+        price_series = json.loads(p.price_series) if p.price_series else []
+        n_total = len(price_series)
+
+        if p.status in ('completed', 'closed'):
+            est_payoff = p.rewards_earned or 0
+        elif p.accuracy_score is not None and p.accuracy_score > 0 and p.staked_tokens > 0:
+            est_payoff = int((p.staked_tokens * n_total) / p.accuracy_score)
+        else:
+            est_payoff = None  # Not yet calculated
+
+        # Calculate progress for active predictions
+        progress = None
+        if p.status == 'active':
+            now = datetime.utcnow()
+            timeframe_durations = {
+                'hourly': timedelta(hours=1),
+                'daily': timedelta(days=1),
+                'weekly': timedelta(weeks=1),
+                'monthly': timedelta(days=30),
+                'yearly': timedelta(days=365)
+            }
+            total_duration = timeframe_durations.get(p.timeframe, timedelta(days=1))
+            elapsed = now - p.created_at
+            progress = min(100.0, (elapsed.total_seconds() / total_duration.total_seconds()) * 100)
+
         predictions_data.append({
             'id': p.id,
             'userId': p.user_id,
@@ -333,9 +359,11 @@ def get_all_predictions():
             'startPrice': p.start_price,
             'endPrice': p.end_price,
             'stakedTokens': p.staked_tokens,
-            'accuracyScore': p.accuracy_score,
+            'mspe': p.accuracy_score,
+            'estimatedPayoff': est_payoff,
             'rewardsEarned': p.rewards_earned,
             'status': p.status,
+            'progress': round(progress, 1) if progress is not None else None,
             'createdAt': p.created_at.isoformat()
         })
 
@@ -621,6 +649,130 @@ def update_prediction_score(prediction_id):
         'predictedPrice': predicted_price_at_now,
         'actualPrice': current_price
     })
+
+
+def calculate_payoff(staked_tokens, n_total, mspe):
+    """Calculate payoff based on stake, prediction length, and MSPE.
+
+    Payoff = stake * N / MSPE
+    Lower MSPE = higher rewards
+    """
+    if mspe is None or mspe <= 0 or staked_tokens <= 0:
+        return 0
+    return int((staked_tokens * n_total) / mspe)
+
+
+def calculate_estimated_payoff(prediction, current_price=None):
+    """Calculate estimated payoff for a prediction based on current state."""
+    price_series = json.loads(prediction.price_series) if prediction.price_series else []
+    n_total = len(price_series)
+
+    if prediction.status == 'completed':
+        return prediction.rewards_earned or 0
+
+    if prediction.accuracy_score is not None and prediction.accuracy_score > 0:
+        return calculate_payoff(prediction.staked_tokens, n_total, prediction.accuracy_score)
+
+    # If no score yet, estimate based on start vs end price difference
+    if current_price and prediction.start_price:
+        diff = abs(current_price - prediction.start_price)
+        estimated_mspe = (diff * diff) / current_price if current_price > 0 else 1
+        if estimated_mspe > 0:
+            return calculate_payoff(prediction.staked_tokens, n_total, estimated_mspe)
+
+    return 0
+
+
+@app.route('/api/predictions/<int:prediction_id>/close', methods=['POST'])
+@require_login
+def close_prediction_early(prediction_id):
+    """Close a prediction early and receive prorated payoff."""
+    prediction = Prediction.query.get(prediction_id)
+    if not prediction:
+        return jsonify({'error': 'Prediction not found'}), 404
+
+    if str(prediction.user_id) != str(current_user.id):
+        return jsonify({'error': 'You can only close your own predictions'}), 403
+
+    if prediction.status != 'active':
+        return jsonify({'error': 'Prediction is not active'}), 400
+
+    data = request.get_json()
+    current_price = data.get('currentPrice')
+
+    if current_price is None or current_price <= 0:
+        return jsonify({'error': 'Valid current price required'}), 400
+
+    price_series = json.loads(prediction.price_series) if prediction.price_series else []
+    n_total = len(price_series)
+
+    if not price_series:
+        return jsonify({'error': 'No price series data'}), 400
+
+    # Calculate progress
+    now = datetime.utcnow()
+    prediction_created = prediction.created_at
+
+    timeframe_durations = {
+        'hourly': timedelta(hours=1),
+        'daily': timedelta(days=1),
+        'weekly': timedelta(weeks=1),
+        'monthly': timedelta(days=30),
+        'yearly': timedelta(days=365)
+    }
+
+    total_duration = timeframe_durations.get(prediction.timeframe, timedelta(days=1))
+    elapsed = now - prediction_created
+    progress = min(1.0, elapsed.total_seconds() / total_duration.total_seconds())
+
+    if progress < 0.05:
+        return jsonify({'error': 'Cannot close prediction in first 5% of timeframe'}), 400
+
+    # Calculate MSPE over elapsed points
+    current_point_index = min(int(progress * n_total), n_total - 1)
+    n_elapsed = current_point_index + 1
+
+    spe_sum = 0.0
+    for i in range(n_elapsed):
+        predicted_price = price_series[i]['price']
+        diff = current_price - predicted_price
+        spe = (diff * diff) / current_price
+        spe_sum += spe
+
+    mspe = spe_sum / n_elapsed
+    prediction.accuracy_score = round(mspe, 6)
+
+    # Calculate prorated payoff
+    # Payoff = (stake * n_elapsed / MSPE) * progress_multiplier
+    # Early close gets reduced payoff (progress_multiplier)
+    if mspe > 0 and prediction.staked_tokens > 0:
+        base_payoff = (prediction.staked_tokens * n_elapsed) / mspe
+        progress_multiplier = 0.5 + (progress * 0.5)  # 50% to 100% based on progress
+        payoff = int(base_payoff * progress_multiplier)
+    else:
+        payoff = 0
+
+    prediction.status = 'closed'
+    prediction.rewards_earned = payoff
+
+    # Credit user
+    user = User.query.get(current_user.id)
+    if user:
+        user.token_balance += payoff
+        db.session.add(user)
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'predictionId': prediction.id,
+        'mspe': prediction.accuracy_score,
+        'progress': round(progress * 100, 1),
+        'payoff': payoff,
+        'newBalance': user.token_balance if user else 0,
+        'message': f'Position closed early at {round(progress * 100, 1)}% progress'
+    })
+
 
 @app.route('/api/health')
 def health():
