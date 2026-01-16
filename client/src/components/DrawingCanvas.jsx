@@ -25,12 +25,12 @@ function formatDate(date, format, timeframe) {
   }
 }
 
-function DrawingCanvas({ 
-  enabled, 
-  chartBounds, 
-  displayBounds, 
-  averagePrediction, 
-  onSubmit, 
+function DrawingCanvas({
+  enabled,
+  chartBounds,
+  displayBounds,
+  averagePrediction,
+  onSubmit,
   timeframe,
   isAuthenticated = false,
   userTokenBalance = 0,
@@ -40,9 +40,11 @@ function DrawingCanvas({
 }) {
   const canvasRef = useRef(null)
   const containerRef = useRef(null)
+  const submittingRef = useRef(false) // Use ref to prevent double-submission
   const [isDrawing, setIsDrawing] = useState(false)
   const [drawnPoints, setDrawnPoints] = useState([])
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState(null)
   const [processedPrediction, setProcessedPrediction] = useState(null)
 
   const priceRange = useMemo(() => {
@@ -276,12 +278,20 @@ function DrawingCanvas({
   }
 
   const handleSubmit = async () => {
+    // Use ref to prevent double-submission (state updates are async)
+    if (submittingRef.current) {
+      console.log('Already submitting, ignoring duplicate call')
+      return
+    }
     if (drawnPoints.length < 2 || !chartBounds) return
-    
+
     const canvas = canvasRef.current
     if (!canvas) return
-    
+
+    submittingRef.current = true
     setSubmitting(true)
+    setSubmitError(null)
+
     try {
       const result = await onSubmit(drawnPoints, {
         width: canvas.width,
@@ -291,14 +301,19 @@ function DrawingCanvas({
         bottomPadding: 30,
         rightPadding: 60
       })
-      
+
       if (result && result.priceSeries) {
         setProcessedPrediction(result.priceSeries)
       }
       setDrawnPoints([])
     } catch (err) {
       console.error('Submit error:', err)
+      const errorMessage = err.response?.data?.error || err.message || 'Failed to submit prediction'
+      setSubmitError(errorMessage)
+      // Clear error after 5 seconds
+      setTimeout(() => setSubmitError(null), 5000)
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -321,19 +336,37 @@ function DrawingCanvas({
     onStakeChange?.(Math.max(0, Math.min(numValue, maxStake)))
   }
 
-  // Handle button touch for mobile - prevents issues with touch-action: none on container
+  // Track if touch was used to prevent both touch and click from firing
+  const touchUsedRef = useRef(false)
+
+  const handleButtonClick = (e, callback) => {
+    // If touch was used, ignore the click (it's a synthetic event)
+    if (touchUsedRef.current) {
+      touchUsedRef.current = false
+      e.preventDefault()
+      return
+    }
+    callback()
+  }
+
   const handleButtonTouch = (e, callback) => {
     e.preventDefault()
     e.stopPropagation()
+    touchUsedRef.current = true
     callback()
+    // Reset after a short delay
+    setTimeout(() => { touchUsedRef.current = false }, 300)
   }
 
   return (
     <div className="drawing-canvas-container" ref={containerRef}>
+      {submitError && (
+        <div className="submit-error">{submitError}</div>
+      )}
       <div className="canvas-controls">
         <button
           className="canvas-btn clear"
-          onClick={handleClear}
+          onClick={(e) => handleButtonClick(e, handleClear)}
           onTouchEnd={(e) => {
             if (drawnPoints.length > 0 && !submitting) {
               handleButtonTouch(e, handleClear)
@@ -363,7 +396,7 @@ function DrawingCanvas({
 
         <button
           className="canvas-btn submit"
-          onClick={handleSubmit}
+          onClick={(e) => handleButtonClick(e, handleSubmit)}
           onTouchEnd={(e) => {
             if (drawnPoints.length >= 2 && !submitting && enabled) {
               handleButtonTouch(e, handleSubmit)
