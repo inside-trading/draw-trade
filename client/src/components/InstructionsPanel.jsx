@@ -12,7 +12,7 @@ function InstructionsPanel() {
           </li>
           <li>
             <span className="step-number">2</span>
-            <span className="step-text">Choose an asset and timeline to trade</span>
+            <span className="step-text">Choose an asset and timeframe to trade</span>
           </li>
           <li>
             <span className="step-number">3</span>
@@ -35,38 +35,57 @@ function InstructionsPanel() {
             <span className="step-text">Track your performance over time</span>
           </li>
         </ol>
+
+        <div className="beta-notice">
+          <div className="beta-badge">BETA</div>
+          <p>We are currently beta testing. Full launch coming soon!</p>
+        </div>
+
+        <div className="disclaimer">
+          This site is offered as-is. Use at your own risk.
+        </div>
       </div>
 
       <div className="instructions-panel scoring-panel">
         <h3>Scoring System</h3>
         <div className="scoring-explanation">
           <p className="scoring-intro">
-            Your accuracy score measures how close your prediction is to the actual price movement.
+            Your score measures the accuracy of your prediction relative to actual price movement.
           </p>
 
           <div className="formula-box">
             <div className="formula-label">Score Formula:</div>
             <div className="formula">
-              Score = <span className="sigma">Σ</span> <span className="fraction"><span className="numerator">1</span><span className="denominator">(actual - predicted)²</span></span>
+              Score = <span className="fraction"><span className="numerator">(actual - predicted)²</span><span className="denominator">actual</span></span>
             </div>
           </div>
 
           <div className="scoring-details">
             <p>
-              <strong>Higher scores are better.</strong> For each time point in your prediction:
+              <strong>Lower scores are better.</strong> For each time point:
             </p>
             <ul>
-              <li>The closer your predicted price is to the actual price, the higher your score</li>
-              <li>Scores are summed across all time periods</li>
-              <li>Perfect predictions approach infinity (capped for display)</li>
+              <li>The closer your predicted price is to the actual price, the lower your score</li>
+              <li>Dividing by actual price normalizes across different asset values</li>
+              <li>Perfect predictions result in a score of 0</li>
               <li>Scores update live as the market moves</li>
             </ul>
+          </div>
+
+          <div className="formula-box payoff-box">
+            <div className="formula-label">Payoff Formula:</div>
+            <div className="formula">
+              Payoff = (Stake × ALPHA) - Score
+            </div>
+            <div className="formula-note">
+              ALPHA = Community average score (ranges 1-100)
+            </div>
           </div>
 
           <div className="rewards-info">
             <h4>Rewards</h4>
             <p>
-              When your prediction period ends, you earn tokens based on your accuracy score multiplied by your staked amount.
+              Beat the community average to earn tokens! Your payoff depends on how your score compares to other predictions.
             </p>
           </div>
         </div>

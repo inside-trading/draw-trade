@@ -517,6 +517,24 @@ def get_user_latest_prediction(symbol):
         }
     })
 
+def calculate_community_alpha(symbol, timeframe):
+    """Calculate ALPHA as the average score of community predictions (clamped 1-100)."""
+    from sqlalchemy import func
+
+    result = db.session.query(func.avg(Prediction.accuracy_score)).filter(
+        Prediction.symbol == symbol,
+        Prediction.timeframe == timeframe,
+        Prediction.accuracy_score.isnot(None),
+        Prediction.status.in_(['active', 'completed'])
+    ).scalar()
+
+    if result is None:
+        return 50.0  # Default ALPHA when no community data
+
+    # Clamp ALPHA between 1 and 100
+    return max(1.0, min(100.0, float(result)))
+
+
 @app.route('/api/predictions/<int:prediction_id>/score', methods=['POST'])
 def update_prediction_score(prediction_id):
     prediction = Prediction.query.get(prediction_id)
@@ -553,6 +571,10 @@ def update_prediction_score(prediction_id):
     elapsed = now - prediction_created
     progress = min(1.0, elapsed.total_seconds() / total_duration.total_seconds())
 
+    current_point_index = 0
+    predicted_price_at_now = None
+    alpha = calculate_community_alpha(prediction.symbol, prediction.timeframe)
+
     if progress >= 0.01:
         # Find the predicted price at the current elapsed time position
         current_point_index = min(
@@ -561,19 +583,18 @@ def update_prediction_score(prediction_id):
         )
         predicted_price_at_now = price_series[current_point_index]['price']
 
-        # Calculate score: 1 / (actual - predicted)²
+        # Calculate score: (actual - predicted)² / actual
+        # Lower scores are better (0 = perfect prediction)
         diff = current_price - predicted_price_at_now
         diff_squared = diff * diff
 
-        if diff_squared > 0.0001:
-            current_score = 1.0 / diff_squared
+        if current_price > 0:
+            current_score = diff_squared / current_price
         else:
-            current_score = 10000.0  # Cap for near-perfect predictions
+            current_score = diff_squared  # Fallback if price is 0
 
         # Accumulate score over time by averaging with previous score
-        # This gives a running average of accuracy throughout the prediction period
         if prediction.accuracy_score is not None:
-            # Weight by progress to give more importance to recent scores
             prediction.accuracy_score = round(
                 (prediction.accuracy_score + current_score) / 2,
                 4
@@ -584,9 +605,11 @@ def update_prediction_score(prediction_id):
         if progress >= 1.0 and prediction.status == 'active':
             prediction.status = 'completed'
             if prediction.staked_tokens > 0:
-                base_reward = prediction.staked_tokens
-                reward_multiplier = prediction.accuracy_score / 50 if prediction.accuracy_score else 0
-                rewards = int(base_reward * reward_multiplier)
+                # Payoff = (stake * ALPHA) - score
+                # If your score is lower than ALPHA, you profit
+                # If your score is higher than ALPHA, you lose
+                payoff = (prediction.staked_tokens * alpha) - prediction.accuracy_score
+                rewards = max(0, int(payoff))  # Can't go negative
                 prediction.rewards_earned = rewards
 
                 if prediction.user_id:
@@ -603,9 +626,10 @@ def update_prediction_score(prediction_id):
         'status': prediction.status,
         'rewardsEarned': prediction.rewards_earned,
         'progress': round(progress * 100, 1),
-        'currentPointIndex': current_point_index if progress >= 0.01 else 0,
-        'predictedPrice': predicted_price_at_now if progress >= 0.01 else None,
-        'actualPrice': current_price
+        'currentPointIndex': current_point_index,
+        'predictedPrice': predicted_price_at_now,
+        'actualPrice': current_price,
+        'alpha': round(alpha, 2)
     })
 
 @app.route('/api/health')
