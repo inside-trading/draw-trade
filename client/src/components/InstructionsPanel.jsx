@@ -42,7 +42,7 @@ function InstructionsPanel() {
         </div>
 
         <div className="disclaimer">
-          This site is offered as-is. Use at your own risk.
+          This site is optimized for desktop. Use at your own risk.
         </div>
       </div>
 
