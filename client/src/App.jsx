@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { Routes, Route, Link, useSearchParams } from 'react-router-dom'
 import SearchBar from './components/SearchBar'
 import PriceChart from './components/PriceChart'
 import DrawingCanvas from './components/DrawingCanvas'
@@ -6,6 +7,8 @@ import AuthHeader from './components/AuthHeader'
 import PredictionsTable from './components/PredictionsTable'
 import InstructionsPanel from './components/InstructionsPanel'
 import ScoringPanel from './components/ScoringPanel'
+import AccountPage from './pages/AccountPage'
+import LeaderboardPage from './pages/LeaderboardPage'
 import { useAuth } from './hooks/useAuth'
 import api from './config/api'
 
@@ -227,9 +230,16 @@ function App() {
       <header className="header">
         <div className="header-content">
           <div className="header-text">
-            <h1>Draw Trade</h1>
+            <Link to="/" className="header-link">
+              <h1>Draw Trade</h1>
+            </Link>
             <p>Draw your price predictions and see how they compare</p>
           </div>
+          <nav className="main-nav">
+            <Link to="/" className="nav-link">Trade</Link>
+            <Link to="/leaderboard" className="nav-link">Leaderboard</Link>
+            {isAuthenticated && <Link to="/account" className="nav-link">Account</Link>}
+          </nav>
           <AuthHeader
             user={user}
             isAuthenticated={isAuthenticated}
@@ -243,7 +253,20 @@ function App() {
         </div>
       </header>
 
-      <InstructionsPanel />
+      <Routes>
+        <Route path="/account" element={
+          <AccountPage
+            user={user}
+            isAuthenticated={isAuthenticated}
+            onRefreshAuth={refetchAuth}
+          />
+        } />
+        <Route path="/leaderboard" element={
+          <LeaderboardPage currentUserId={user?.id} />
+        } />
+        <Route path="/" element={
+          <>
+            <InstructionsPanel />
 
       <div className="controls-section">
         <SearchBar onSelect={handleAssetSelect} selectedAsset={selectedAsset} />
@@ -405,7 +428,10 @@ function App() {
         onRefreshAuth={refetchAuth}
       />
 
-      <ScoringPanel />
+            <ScoringPanel />
+          </>
+        } />
+      </Routes>
     </div>
   )
 }

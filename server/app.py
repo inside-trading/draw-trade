@@ -774,6 +774,185 @@ def close_prediction_early(prediction_id):
     })
 
 
+@app.route('/api/leaderboard')
+def get_leaderboard():
+    """Get leaderboard of users ranked by mean MSPE across all predictions."""
+    from sqlalchemy import func
+
+    # Get users with their average MSPE and prediction count
+    user_stats = db.session.query(
+        Prediction.user_id,
+        func.avg(Prediction.accuracy_score).label('mean_mspe'),
+        func.count(Prediction.id).label('prediction_count'),
+        func.sum(Prediction.staked_tokens).label('total_staked'),
+        func.sum(Prediction.rewards_earned).label('total_rewards')
+    ).filter(
+        Prediction.user_id.isnot(None),
+        Prediction.accuracy_score.isnot(None)
+    ).group_by(Prediction.user_id).all()
+
+    leaderboard = []
+    for stat in user_stats:
+        user = User.query.get(stat.user_id)
+        if user:
+            display_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+            if not display_name:
+                display_name = user.email.split('@')[0] if user.email else 'Anonymous'
+
+            leaderboard.append({
+                'userId': user.id,
+                'displayName': display_name,
+                'meanMspe': round(float(stat.mean_mspe), 6) if stat.mean_mspe else None,
+                'predictionCount': stat.prediction_count,
+                'totalStaked': stat.total_staked or 0,
+                'totalRewards': stat.total_rewards or 0,
+                'tokenBalance': user.token_balance,
+                'profitLoss': (stat.total_rewards or 0) - (stat.total_staked or 0)
+            })
+
+    # Sort by mean MSPE (lower is better), then by token balance
+    leaderboard.sort(key=lambda x: (x['meanMspe'] if x['meanMspe'] is not None else float('inf'), -x['tokenBalance']))
+
+    # Add rank
+    for i, entry in enumerate(leaderboard):
+        entry['rank'] = i + 1
+
+    return jsonify({
+        'leaderboard': leaderboard,
+        'totalUsers': len(leaderboard)
+    })
+
+
+@app.route('/api/user/stats')
+@require_login
+def get_user_stats():
+    """Get detailed statistics for the current user."""
+    from sqlalchemy import func
+
+    user = User.query.get(current_user.id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    # Get prediction stats
+    predictions = Prediction.query.filter_by(user_id=current_user.id).all()
+
+    active_predictions = [p for p in predictions if p.status == 'active']
+    completed_predictions = [p for p in predictions if p.status in ('completed', 'closed')]
+
+    # Calculate mean MSPE
+    mspe_values = [p.accuracy_score for p in predictions if p.accuracy_score is not None]
+    mean_mspe = sum(mspe_values) / len(mspe_values) if mspe_values else None
+
+    # Calculate totals
+    total_staked = sum(p.staked_tokens for p in predictions)
+    total_rewards = sum(p.rewards_earned or 0 for p in predictions)
+
+    # Get user's rank on leaderboard
+    all_user_mspes = db.session.query(
+        Prediction.user_id,
+        func.avg(Prediction.accuracy_score).label('mean_mspe')
+    ).filter(
+        Prediction.user_id.isnot(None),
+        Prediction.accuracy_score.isnot(None)
+    ).group_by(Prediction.user_id).all()
+
+    sorted_users = sorted(all_user_mspes, key=lambda x: x.mean_mspe if x.mean_mspe else float('inf'))
+    rank = next((i + 1 for i, u in enumerate(sorted_users) if u.user_id == current_user.id), None)
+
+    # Build prediction history for chart
+    prediction_history = []
+    for p in sorted(predictions, key=lambda x: x.created_at):
+        prediction_history.append({
+            'id': p.id,
+            'symbol': p.symbol,
+            'timeframe': p.timeframe,
+            'stakedTokens': p.staked_tokens,
+            'rewardsEarned': p.rewards_earned,
+            'mspe': p.accuracy_score,
+            'status': p.status,
+            'createdAt': p.created_at.isoformat()
+        })
+
+    return jsonify({
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'firstName': user.first_name,
+            'lastName': user.last_name,
+            'tokenBalance': user.token_balance,
+            'createdAt': user.created_at.isoformat()
+        },
+        'stats': {
+            'totalPredictions': len(predictions),
+            'activePredictions': len(active_predictions),
+            'completedPredictions': len(completed_predictions),
+            'meanMspe': round(mean_mspe, 6) if mean_mspe else None,
+            'totalStaked': total_staked,
+            'totalRewards': total_rewards,
+            'profitLoss': total_rewards - total_staked,
+            'rank': rank,
+            'totalRankedUsers': len(sorted_users)
+        },
+        'predictionHistory': prediction_history
+    })
+
+
+@app.route('/api/user/predictions/detailed')
+@require_login
+def get_user_predictions_detailed():
+    """Get detailed predictions for the current user with progress info."""
+    predictions = Prediction.query.filter_by(
+        user_id=current_user.id
+    ).order_by(Prediction.created_at.desc()).all()
+
+    now = datetime.utcnow()
+    timeframe_durations = {
+        'hourly': timedelta(hours=1),
+        'daily': timedelta(days=1),
+        'weekly': timedelta(weeks=1),
+        'monthly': timedelta(days=30),
+        'yearly': timedelta(days=365)
+    }
+
+    result = []
+    for p in predictions:
+        # Calculate progress
+        progress = None
+        if p.status == 'active':
+            total_duration = timeframe_durations.get(p.timeframe, timedelta(days=1))
+            elapsed = now - p.created_at
+            progress = min(100.0, (elapsed.total_seconds() / total_duration.total_seconds()) * 100)
+
+        # Calculate estimated payoff
+        price_series = json.loads(p.price_series) if p.price_series else []
+        n_total = len(price_series)
+
+        if p.status in ('completed', 'closed'):
+            est_payoff = p.rewards_earned or 0
+        elif p.accuracy_score and p.accuracy_score > 0 and p.staked_tokens > 0:
+            est_payoff = int((p.staked_tokens * n_total) / p.accuracy_score)
+        else:
+            est_payoff = None
+
+        result.append({
+            'id': p.id,
+            'symbol': p.symbol,
+            'assetName': p.asset_name,
+            'timeframe': p.timeframe,
+            'startPrice': p.start_price,
+            'endPrice': p.end_price,
+            'stakedTokens': p.staked_tokens,
+            'mspe': p.accuracy_score,
+            'estimatedPayoff': est_payoff,
+            'rewardsEarned': p.rewards_earned,
+            'status': p.status,
+            'progress': round(progress, 1) if progress is not None else None,
+            'createdAt': p.created_at.isoformat()
+        })
+
+    return jsonify({'predictions': result})
+
+
 @app.route('/api/health')
 def health():
     return jsonify({'status': 'ok'})
