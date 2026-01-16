@@ -400,6 +400,9 @@ function App() {
         key={predictionsTableKey}
         currentSymbol={selectedAsset?.symbol}
         onAssetClick={handleAssetFromTable}
+        currentUserId={user?.id}
+        currentPrice={chartBounds?.lastPrice}
+        onRefreshAuth={refetchAuth}
       />
 
       <ScoringPanel />

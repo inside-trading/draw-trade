@@ -9,14 +9,21 @@ const TIMEFRAME_LABELS = {
   yearly: 'Yearly'
 }
 
-export default function PredictionsTable({ currentSymbol, onAssetClick }) {
+const STATUS_LABELS = {
+  active: 'Active',
+  completed: 'Completed',
+  closed: 'Closed Early'
+}
+
+export default function PredictionsTable({ currentSymbol, onAssetClick, currentUserId, currentPrice, onRefreshAuth }) {
   const [predictions, setPredictions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
-  
+  const [closingId, setClosingId] = useState(null)
+
   const [filters, setFilters] = useState({
     symbol: '',
     timeframe: '',
@@ -28,7 +35,7 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
   const fetchPredictions = useCallback(async () => {
     setLoading(true)
     setError(null)
-    
+
     try {
       const params = {
         page,
@@ -36,11 +43,11 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
         sort_by: sortBy,
         sort_order: sortOrder
       }
-      
+
       if (filters.symbol) params.symbol = filters.symbol
       if (filters.timeframe) params.timeframe = filters.timeframe
       if (filters.user_id) params.user_id = filters.user_id
-      
+
       const response = await api.get('/api/predictions/all', { params })
       setPredictions(response.data.predictions)
       setTotalPages(response.data.pages)
@@ -55,6 +62,12 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
 
   useEffect(() => {
     fetchPredictions()
+  }, [fetchPredictions])
+
+  // Auto-refresh every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(fetchPredictions, 30000)
+    return () => clearInterval(interval)
   }, [fetchPredictions])
 
   const handleSort = (column) => {
@@ -72,6 +85,35 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
     setPage(1)
   }
 
+  const handleClosePosition = async (predictionId, priceToUse) => {
+    if (!priceToUse) {
+      alert('Current price not available. Please try again.')
+      return
+    }
+
+    if (!window.confirm('Are you sure you want to close this position early? You will receive a prorated payoff.')) {
+      return
+    }
+
+    setClosingId(predictionId)
+    try {
+      const response = await api.post(`/api/predictions/${predictionId}/close`, {
+        currentPrice: priceToUse
+      }, { withCredentials: true })
+
+      if (response.data.success) {
+        alert(`Position closed! Payoff: ${response.data.payoff} tokens`)
+        fetchPredictions()
+        if (onRefreshAuth) onRefreshAuth()
+      }
+    } catch (err) {
+      const message = err.response?.data?.error || 'Failed to close position'
+      alert(message)
+    } finally {
+      setClosingId(null)
+    }
+  }
+
   const formatDate = (isoString) => {
     const date = new Date(isoString)
     return date.toLocaleDateString('en-US', {
@@ -87,10 +129,24 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
     return `$${price.toFixed(2)}`
   }
 
+  const formatPayoff = (payoff) => {
+    if (payoff === null || payoff === undefined) return '-'
+    return payoff.toLocaleString()
+  }
+
   const getPriceChange = (start, end) => {
     const change = ((end - start) / start) * 100
     const sign = change >= 0 ? '+' : ''
     return { value: `${sign}${change.toFixed(1)}%`, isPositive: change >= 0 }
+  }
+
+  const getStatusClass = (status) => {
+    switch (status) {
+      case 'active': return 'status-active'
+      case 'completed': return 'status-completed'
+      case 'closed': return 'status-closed'
+      default: return ''
+    }
   }
 
   const SortIcon = ({ column }) => {
@@ -123,21 +179,22 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
             <option key={key} value={key}>{label}</option>
           ))}
         </select>
-        <input
-          type="text"
-          placeholder="Filter by user ID..."
-          value={filters.user_id}
-          onChange={(e) => handleFilterChange('user_id', e.target.value)}
-          className="filter-input"
-        />
-        <button 
+        <select
+          value={filters.user_id ? 'mine' : ''}
+          onChange={(e) => handleFilterChange('user_id', e.target.value === 'mine' ? currentUserId : '')}
+          className="filter-select"
+        >
+          <option value="">All Users</option>
+          {currentUserId && <option value="mine">My Predictions</option>}
+        </select>
+        <button
           onClick={() => {
             setFilters({ symbol: '', timeframe: '', user_id: '' })
             setPage(1)
           }}
           className="clear-filters-btn"
         >
-          Clear Filters
+          Clear
         </button>
       </div>
 
@@ -159,31 +216,30 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
                 <th onClick={() => handleSort('timeframe')}>
                   Timeframe <SortIcon column="timeframe" />
                 </th>
-                <th onClick={() => handleSort('start_price')}>
-                  Start <SortIcon column="start_price" />
-                </th>
-                <th onClick={() => handleSort('end_price')}>
-                  Target <SortIcon column="end_price" />
-                </th>
-                <th>Change</th>
                 <th onClick={() => handleSort('staked_tokens')}>
                   Staked <SortIcon column="staked_tokens" />
                 </th>
+                <th>Status</th>
+                <th>Progress</th>
                 <th onClick={() => handleSort('accuracy_score')}>
-                  Score <SortIcon column="accuracy_score" />
+                  MSPE <SortIcon column="accuracy_score" />
                 </th>
+                <th>Est. Payoff</th>
                 <th onClick={() => handleSort('created_at')}>
                   Date <SortIcon column="created_at" />
                 </th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {predictions.map((pred) => {
-                const change = getPriceChange(pred.startPrice, pred.endPrice)
+                const isOwn = currentUserId && pred.userId === currentUserId
+                const canClose = isOwn && pred.status === 'active' && pred.progress >= 5
+
                 return (
-                  <tr key={pred.id}>
+                  <tr key={pred.id} className={isOwn ? 'own-prediction' : ''}>
                     <td>
-                      <button 
+                      <button
                         className="asset-link"
                         onClick={() => onAssetClick?.(pred.symbol, pred.assetName)}
                       >
@@ -192,14 +248,46 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
                     </td>
                     <td className="user-cell">{pred.userName}</td>
                     <td>{TIMEFRAME_LABELS[pred.timeframe] || pred.timeframe}</td>
-                    <td>{formatPrice(pred.startPrice)}</td>
-                    <td>{formatPrice(pred.endPrice)}</td>
-                    <td className={change.isPositive ? 'positive' : 'negative'}>
-                      {change.value}
-                    </td>
                     <td>{pred.stakedTokens > 0 ? pred.stakedTokens.toLocaleString() : '-'}</td>
-                    <td className="score-cell">{pred.accuracyScore !== null ? pred.accuracyScore.toFixed(2) : '-'}</td>
+                    <td>
+                      <span className={`status-badge ${getStatusClass(pred.status)}`}>
+                        {STATUS_LABELS[pred.status] || pred.status}
+                      </span>
+                    </td>
+                    <td>
+                      {pred.status === 'active' && pred.progress !== null ? (
+                        <div className="progress-bar-container">
+                          <div className="progress-bar" style={{ width: `${Math.min(pred.progress, 100)}%` }} />
+                          <span className="progress-text">{pred.progress.toFixed(0)}%</span>
+                        </div>
+                      ) : pred.status === 'completed' ? (
+                        <span className="progress-complete">100%</span>
+                      ) : pred.status === 'closed' ? (
+                        <span className="progress-closed">Closed</span>
+                      ) : '-'}
+                    </td>
+                    <td className="mspe-cell">
+                      {pred.mspe !== null ? pred.mspe.toFixed(4) : '-'}
+                    </td>
+                    <td className="payoff-cell">
+                      {pred.status === 'completed' || pred.status === 'closed' ? (
+                        <span className="payoff-final">{formatPayoff(pred.rewardsEarned)}</span>
+                      ) : (
+                        <span className="payoff-estimate">~{formatPayoff(pred.estimatedPayoff)}</span>
+                      )}
+                    </td>
                     <td className="date-cell">{formatDate(pred.createdAt)}</td>
+                    <td>
+                      {canClose && (
+                        <button
+                          className="close-btn"
+                          onClick={() => handleClosePosition(pred.id, currentPrice || pred.startPrice)}
+                          disabled={closingId === pred.id}
+                        >
+                          {closingId === pred.id ? '...' : 'Close'}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 )
               })}
@@ -208,7 +296,7 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
 
           {totalPages > 1 && (
             <div className="table-pagination">
-              <button 
+              <button
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 disabled={page === 1}
                 className="pagination-btn"
@@ -218,7 +306,7 @@ export default function PredictionsTable({ currentSymbol, onAssetClick }) {
               <span className="page-info">
                 Page {page} of {totalPages}
               </span>
-              <button 
+              <button
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages}
                 className="pagination-btn"
