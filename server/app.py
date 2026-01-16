@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 from db import db
 from models import User, Prediction, PriceData
-from auth import auth_bp, init_auth, require_login
+from auth import auth_bp, init_auth, require_login, get_authenticated_user
 import twelve_data
 
 app = Flask(__name__)
@@ -407,14 +407,16 @@ def submit_prediction():
     if not symbol or not points or len(points) < 2:
         return jsonify({'error': 'Invalid prediction data'}), 400
 
-    if not current_user.is_authenticated:
+    # Use get_authenticated_user to support both cookie and token auth
+    auth_user = get_authenticated_user()
+    if not auth_user:
         return jsonify({'error': 'You must be logged in to submit predictions'}), 401
 
     if staked_tokens < 1:
         return jsonify({'error': 'Minimum stake is 1 token'}), 400
 
-    user_id = current_user.id
-    user = User.query.get(current_user.id)
+    user_id = auth_user.id
+    user = User.query.get(auth_user.id)
     if user.token_balance < staked_tokens:
         return jsonify({'error': 'Insufficient token balance'}), 400
     user.token_balance -= staked_tokens
