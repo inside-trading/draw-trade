@@ -5,6 +5,7 @@ import DrawingCanvas from './components/DrawingCanvas'
 import AuthHeader from './components/AuthHeader'
 import PredictionsTable from './components/PredictionsTable'
 import InstructionsPanel from './components/InstructionsPanel'
+import ScoringPanel from './components/ScoringPanel'
 import { useAuth } from './hooks/useAuth'
 import api from './config/api'
 
@@ -119,9 +120,10 @@ function App() {
       if (response.data.prediction) {
         setUserPrediction(response.data.prediction.priceSeries)
         setLiveScore({
-          accuracy: response.data.prediction.accuracyScore,
+          mspe: response.data.prediction.accuracyScore,
           status: response.data.prediction.status,
-          predictionId: response.data.prediction.id
+          predictionId: response.data.prediction.id,
+          nTotal: response.data.prediction.priceSeries?.length || 0
         })
       } else {
         setUserPrediction(null)
@@ -141,9 +143,11 @@ function App() {
       })
       setLiveScore(prev => ({
         ...prev,
-        accuracy: response.data.accuracyScore,
+        mspe: response.data.mspe,
         status: response.data.status,
-        progress: response.data.progress
+        progress: response.data.progress,
+        nElapsed: response.data.nElapsed,
+        nTotal: response.data.nTotal
       }))
     } catch (err) {
       console.error('Failed to update score:', err)
@@ -378,9 +382,9 @@ function App() {
           </div>
           {liveScore && (
             <div className="info-item live-score">
-              <div className="label">Your Accuracy</div>
-              <div className={`value ${liveScore.accuracy >= 50 ? 'up' : 'down'}`}>
-                {liveScore.accuracy !== null ? `${liveScore.accuracy.toFixed(1)}%` : '-'}
+              <div className="label">Your MSPE</div>
+              <div className={`value ${liveScore.mspe !== null && liveScore.mspe < 10 ? 'up' : 'down'}`}>
+                {liveScore.mspe !== null ? liveScore.mspe.toFixed(4) : '-'}
                 {liveScore.progress && <span className="progress-indicator"> ({liveScore.progress}%)</span>}
               </div>
             </div>
@@ -392,11 +396,13 @@ function App() {
         </div>
       )}
 
-      <PredictionsTable 
+      <PredictionsTable
         key={predictionsTableKey}
         currentSymbol={selectedAsset?.symbol}
         onAssetClick={handleAssetFromTable}
       />
+
+      <ScoringPanel />
     </div>
   )
 }

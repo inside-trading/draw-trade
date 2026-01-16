@@ -517,26 +517,16 @@ def get_user_latest_prediction(symbol):
         }
     })
 
-def calculate_community_alpha(symbol, timeframe):
-    """Calculate ALPHA as the average score of community predictions (clamped 1-100)."""
-    from sqlalchemy import func
-
-    result = db.session.query(func.avg(Prediction.accuracy_score)).filter(
-        Prediction.symbol == symbol,
-        Prediction.timeframe == timeframe,
-        Prediction.accuracy_score.isnot(None),
-        Prediction.status.in_(['active', 'completed'])
-    ).scalar()
-
-    if result is None:
-        return 50.0  # Default ALPHA when no community data
-
-    # Clamp ALPHA between 1 and 100
-    return max(1.0, min(100.0, float(result)))
-
-
 @app.route('/api/predictions/<int:prediction_id>/score', methods=['POST'])
 def update_prediction_score(prediction_id):
+    """
+    Update prediction score using Mean Squared Percentage Error (MSPE).
+
+    MSPE = (1/N) * Σ [(actual - predicted)² / actual]
+
+    Where N is the number of elapsed time points.
+    Payoff = stake * N / MSPE (lower MSPE = higher reward)
+    """
     prediction = Prediction.query.get(prediction_id)
     if not prediction:
         return jsonify({'error': 'Prediction not found'}), 404
@@ -550,6 +540,9 @@ def update_prediction_score(prediction_id):
 
     if current_price is None:
         return jsonify({'error': 'Current price required'}), 400
+
+    if current_price <= 0:
+        return jsonify({'error': 'Invalid price'}), 400
 
     price_series = json.loads(prediction.price_series) if prediction.price_series else []
 
@@ -571,45 +564,41 @@ def update_prediction_score(prediction_id):
     elapsed = now - prediction_created
     progress = min(1.0, elapsed.total_seconds() / total_duration.total_seconds())
 
+    n_total = len(price_series)  # Total prediction points
     current_point_index = 0
     predicted_price_at_now = None
-    alpha = calculate_community_alpha(prediction.symbol, prediction.timeframe)
+    mspe = None
 
     if progress >= 0.01:
-        # Find the predicted price at the current elapsed time position
+        # Calculate number of elapsed points
         current_point_index = min(
-            int(progress * len(price_series)),
-            len(price_series) - 1
+            int(progress * n_total),
+            n_total - 1
         )
+        n_elapsed = current_point_index + 1  # Number of points that have elapsed
+
         predicted_price_at_now = price_series[current_point_index]['price']
 
-        # Calculate score: (actual - predicted)² / actual
-        # Lower scores are better (0 = perfect prediction)
-        diff = current_price - predicted_price_at_now
-        diff_squared = diff * diff
+        # Compute MSPE over all elapsed points
+        # SPE = (actual - predicted)² / actual
+        # MSPE = mean of all SPE values
+        spe_sum = 0.0
+        for i in range(n_elapsed):
+            predicted_price = price_series[i]['price']
+            diff = current_price - predicted_price
+            spe = (diff * diff) / current_price
+            spe_sum += spe
 
-        if current_price > 0:
-            current_score = diff_squared / current_price
-        else:
-            current_score = diff_squared  # Fallback if price is 0
-
-        # Accumulate score over time by averaging with previous score
-        if prediction.accuracy_score is not None:
-            prediction.accuracy_score = round(
-                (prediction.accuracy_score + current_score) / 2,
-                4
-            )
-        else:
-            prediction.accuracy_score = round(current_score, 4)
+        mspe = spe_sum / n_elapsed
+        prediction.accuracy_score = round(mspe, 6)
 
         if progress >= 1.0 and prediction.status == 'active':
             prediction.status = 'completed'
-            if prediction.staked_tokens > 0:
-                # Payoff = (stake * ALPHA) - score
-                # If your score is lower than ALPHA, you profit
-                # If your score is higher than ALPHA, you lose
-                payoff = (prediction.staked_tokens * alpha) - prediction.accuracy_score
-                rewards = max(0, int(payoff))  # Can't go negative
+            if prediction.staked_tokens > 0 and mspe > 0:
+                # Payoff = stake * N / MSPE
+                # Lower MSPE = higher rewards
+                payoff = (prediction.staked_tokens * n_total) / mspe
+                rewards = int(payoff)
                 prediction.rewards_earned = rewards
 
                 if prediction.user_id:
@@ -622,14 +611,15 @@ def update_prediction_score(prediction_id):
 
     return jsonify({
         'predictionId': prediction.id,
-        'accuracyScore': prediction.accuracy_score,
+        'mspe': prediction.accuracy_score,
         'status': prediction.status,
         'rewardsEarned': prediction.rewards_earned,
         'progress': round(progress * 100, 1),
         'currentPointIndex': current_point_index,
+        'nElapsed': current_point_index + 1 if progress >= 0.01 else 0,
+        'nTotal': n_total,
         'predictedPrice': predicted_price_at_now,
-        'actualPrice': current_price,
-        'alpha': round(alpha, 2)
+        'actualPrice': current_price
     })
 
 @app.route('/api/health')
