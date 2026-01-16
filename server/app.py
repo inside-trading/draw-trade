@@ -32,11 +32,22 @@ allowed_origins = [
 if os.environ.get('VERCEL_URL'):
     allowed_origins.append(f"https://{os.environ.get('VERCEL_URL')}")
 
+# Add the production domain
+production_domain = os.environ.get('PRODUCTION_DOMAIN', 'draw.trade')
+allowed_origins.extend([
+    f'https://{production_domain}',
+    f'https://www.{production_domain}',
+])
+
+# Log allowed origins for debugging
+logging.info(f"Allowed CORS origins: {allowed_origins}")
+
 CORS(app,
      supports_credentials=True,
      origins=allowed_origins,
-     allow_headers=['Content-Type', 'Authorization'],
-     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
+     allow_headers=['Content-Type', 'Authorization', 'X-Requested-With'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     expose_headers=['Set-Cookie'])
 
 # Handle Railway's postgres:// URL format (SQLAlchemy requires postgresql://)
 database_url = os.environ.get('DATABASE_URL')
@@ -59,7 +70,14 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 is_production = os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('FLASK_ENV') == 'production'
 app.config['SESSION_COOKIE_SAMESITE'] = 'None' if is_production else 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = is_production
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
+app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=30)
+app.config['REMEMBER_COOKIE_SAMESITE'] = 'None' if is_production else 'Lax'
+app.config['REMEMBER_COOKIE_SECURE'] = is_production
+app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+
+logging.info(f"Production mode: {is_production}, SameSite: {'None' if is_production else 'Lax'}")
 
 db.init_app(app)
 
