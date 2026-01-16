@@ -279,12 +279,17 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
+  touch-action: none;
 }
 
 .drawing-canvas-container canvas {
   width: 100%;
   height: 100%;
   cursor: crosshair;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .canvas-controls {
@@ -333,6 +338,8 @@ body {
   position: relative;
   flex: 1;
   min-height: 0;
+  touch-action: none;
+  overflow: hidden;
 }
 
 .info-bar {
@@ -1935,5 +1942,69 @@ body {
   .leaderboard-table th,
   .leaderboard-table td {
     padding: 8px 6px;
+  }
+
+  /* Chart and drawing area mobile layout */
+  .chart-section {
+    flex-direction: column;
+    max-height: none;
+    min-height: auto;
+  }
+
+  .price-chart-container {
+    min-height: 250px;
+  }
+
+  .drawing-canvas-container {
+    width: 100%;
+    min-height: 300px;
+    border-left: none;
+    border-top: 2px solid #2d3748;
+  }
+
+  .canvas-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .canvas-btn {
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+
+  .stake-input-group {
+    flex: 1;
+    min-width: 120px;
+    justify-content: center;
+  }
+
+  .controls-section {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .search-container {
+    width: 100%;
+  }
+
+  .timeframe-buttons {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .sentiment-slider-container {
+    width: 100%;
+    max-width: 400px;
+  }
+
+  .info-bar {
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+  }
+
+  .info-item {
+    min-width: 80px;
   }
 }
