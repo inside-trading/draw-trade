@@ -964,11 +964,15 @@ body {
 }
 
 /* Instructions Panel Styles */
-.instructions-section {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
+.instructions-section-centered {
+  display: flex;
+  justify-content: center;
   margin-bottom: 25px;
+}
+
+.instructions-section-centered .instructions-panel {
+  max-width: 600px;
+  width: 100%;
 }
 
 .instructions-panel {
@@ -1175,8 +1179,42 @@ body {
   margin-top: 8px;
 }
 
+/* Scoring Section (Bottom of Page) */
+.scoring-section {
+  margin-top: 30px;
+  margin-bottom: 30px;
+}
+
+.scoring-panel-full {
+  background: #1a202c;
+  border-radius: 12px;
+  border: 2px solid #2d3748;
+  padding: 25px 30px;
+}
+
+.scoring-panel-full h3 {
+  font-size: 1.3rem;
+  color: #00d4ff;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #2d3748;
+  text-align: center;
+}
+
+.scoring-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+}
+
+.scoring-column {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
 @media (max-width: 900px) {
-  .instructions-section {
+  .scoring-content {
     grid-template-columns: 1fr;
   }
 }
