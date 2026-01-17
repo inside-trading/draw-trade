@@ -94,9 +94,8 @@ export default function LeaderboardPage({ currentUserId }) {
         <>
           <div className="leaderboard-intro">
             <p>
-              Traders are ranked by their <strong>Time-Weighted MSPE</strong> -
-              a metric that weighs recent predictions more heavily (30-day half-life).
-              Lower is better!
+              Traders are ranked by their <strong>overall MSPE</strong> (Mean Squared Percentage Error).
+              Multiple predictions on the same day are averaged together. Lower is better!
             </p>
           </div>
 
@@ -106,7 +105,7 @@ export default function LeaderboardPage({ currentUserId }) {
               <div className="podium-place second">
                 <div className="podium-avatar">{leaderboard[1].displayName.charAt(0).toUpperCase()}</div>
                 <div className="podium-name">{leaderboard[1].displayName}</div>
-                <div className="podium-mspe">{leaderboard[1].timeWeightedMspe?.toFixed(4) || '-'}</div>
+                <div className="podium-mspe">{leaderboard[1].mspe?.toFixed(4) || '-'}</div>
                 <div className="podium-balance">{leaderboard[1].tokenBalance.toLocaleString()} tokens</div>
                 <div className="podium-stand">2</div>
               </div>
@@ -114,14 +113,14 @@ export default function LeaderboardPage({ currentUserId }) {
                 <div className="podium-crown">👑</div>
                 <div className="podium-avatar gold">{leaderboard[0].displayName.charAt(0).toUpperCase()}</div>
                 <div className="podium-name">{leaderboard[0].displayName}</div>
-                <div className="podium-mspe">{leaderboard[0].timeWeightedMspe?.toFixed(4) || '-'}</div>
+                <div className="podium-mspe">{leaderboard[0].mspe?.toFixed(4) || '-'}</div>
                 <div className="podium-balance">{leaderboard[0].tokenBalance.toLocaleString()} tokens</div>
                 <div className="podium-stand gold">1</div>
               </div>
               <div className="podium-place third">
                 <div className="podium-avatar">{leaderboard[2].displayName.charAt(0).toUpperCase()}</div>
                 <div className="podium-name">{leaderboard[2].displayName}</div>
-                <div className="podium-mspe">{leaderboard[2].timeWeightedMspe?.toFixed(4) || '-'}</div>
+                <div className="podium-mspe">{leaderboard[2].mspe?.toFixed(4) || '-'}</div>
                 <div className="podium-balance">{leaderboard[2].tokenBalance.toLocaleString()} tokens</div>
                 <div className="podium-stand">3</div>
               </div>
@@ -135,7 +134,7 @@ export default function LeaderboardPage({ currentUserId }) {
                 <tr>
                   <th>Rank</th>
                   <th>Trader</th>
-                  <th>TW-MSPE</th>
+                  <th>MSPE</th>
                   <th>Predictions</th>
                   <th>Token Balance</th>
                   <th>Profit/Loss</th>
@@ -155,7 +154,7 @@ export default function LeaderboardPage({ currentUserId }) {
                         {currentUserId === entry.userId && <span className="you-badge">You</span>}
                       </span>
                     </td>
-                    <td className="mspe-cell">{entry.timeWeightedMspe?.toFixed(4) || '-'}</td>
+                    <td className="mspe-cell">{entry.mspe?.toFixed(4) || '-'}</td>
                     <td>{entry.predictionCount}</td>
                     <td className="balance-cell">{entry.tokenBalance.toLocaleString()}</td>
                     <td className={`pl-cell ${entry.profitLoss >= 0 ? 'positive' : 'negative'}`}>

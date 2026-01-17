@@ -1068,8 +1068,9 @@ def calculate_time_weighted_mspe(predictions, half_life_days=30):
 
 @app.route('/api/leaderboard')
 def get_leaderboard():
-    """Get leaderboard of users ranked by time-weighted MSPE across all predictions."""
+    """Get leaderboard of users ranked by overall MSPE across all predictions."""
     from sqlalchemy import func
+    from collections import defaultdict
 
     # Get all users with predictions
     user_ids = db.session.query(Prediction.user_id).filter(
@@ -1094,11 +1095,15 @@ def get_leaderboard():
         if not predictions:
             continue
 
-        # Calculate time-weighted MSPE
-        tw_mspe = calculate_time_weighted_mspe(predictions)
+        # Group predictions by date and calculate daily average MSPE
+        daily_mspes = defaultdict(list)
+        for p in predictions:
+            date_key = p.created_at.date()
+            daily_mspes[date_key].append(p.accuracy_score)
 
-        # Calculate regular mean MSPE for comparison
-        mean_mspe = sum(p.accuracy_score for p in predictions) / len(predictions)
+        # Average MSPE per day, then average across all days
+        daily_averages = [sum(scores) / len(scores) for scores in daily_mspes.values()]
+        overall_mspe = sum(daily_averages) / len(daily_averages) if daily_averages else None
 
         # Calculate totals
         total_staked = sum(p.staked_tokens for p in predictions)
@@ -1112,8 +1117,7 @@ def get_leaderboard():
         leaderboard.append({
             'userId': user.id,
             'displayName': display_name,
-            'timeWeightedMspe': round(float(tw_mspe), 6) if tw_mspe else None,
-            'meanMspe': round(float(mean_mspe), 6) if mean_mspe else None,
+            'mspe': round(float(overall_mspe), 6) if overall_mspe else None,
             'predictionCount': prediction_count,
             'totalStaked': total_staked or 0,
             'totalRewards': total_rewards or 0,
@@ -1121,8 +1125,8 @@ def get_leaderboard():
             'profitLoss': (total_rewards or 0) - (total_staked or 0)
         })
 
-    # Sort by time-weighted MSPE (lower is better), then by token balance
-    leaderboard.sort(key=lambda x: (x['timeWeightedMspe'] if x['timeWeightedMspe'] is not None else float('inf'), -x['tokenBalance']))
+    # Sort by MSPE (lower is better), then by token balance
+    leaderboard.sort(key=lambda x: (x['mspe'] if x['mspe'] is not None else float('inf'), -x['tokenBalance']))
 
     # Add rank
     for i, entry in enumerate(leaderboard):
