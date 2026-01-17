@@ -15,8 +15,8 @@ class User(UserMixin, db.Model):
     last_name = db.Column(db.String, nullable=True)
     profile_image_url = db.Column(db.String, nullable=True)
     token_balance = db.Column(db.Integer, default=DEFAULT_TOKEN_BALANCE, nullable=False)
-    timezone = db.Column(db.String(50), default='America/New_York', nullable=False)
-    language = db.Column(db.String(10), default='en', nullable=False)
+    timezone = db.Column(db.String(50), default='America/New_York', nullable=True)
+    language = db.Column(db.String(10), default='en', nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

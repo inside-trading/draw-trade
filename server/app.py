@@ -1531,8 +1531,8 @@ def get_user_settings():
 
     return jsonify({
         'settings': {
-            'timezone': user.timezone,
-            'language': user.language
+            'timezone': user.timezone or 'America/New_York',
+            'language': user.language or 'en'
         },
         'availableTimezones': SUPPORTED_TIMEZONES,
         'availableLanguages': SUPPORTED_LANGUAGES
