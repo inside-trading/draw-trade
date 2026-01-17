@@ -5,7 +5,7 @@ export default function ScoringPage() {
   return (
     <div className="page-container scoring-page">
       <div className="page-header">
-        <h1>Scoring System</h1>
+        <h1>Scoring & Rewards</h1>
         <Link to="/" className="back-link">Back to Trade</Link>
       </div>
 
@@ -13,54 +13,52 @@ export default function ScoringPage() {
         <div className="scoring-content">
           <div className="scoring-column">
             <p className="scoring-intro">
-              Your prediction accuracy is measured using the Mean Squared Percentage Error (MSPE) computed over the entire path of your prediction.
+              Your rewards are based on two factors: <strong>prediction accuracy</strong> and <strong>being contrarian</strong>.
+              Make accurate predictions that differ from the crowd to maximize your earnings.
             </p>
 
             <div className="formula-box">
-              <div className="formula-label">Squared Percentage Error (at each time point):</div>
+              <div className="formula-label">Accuracy Score (MSPE):</div>
               <div className="formula">
-                SPE = <span className="fraction"><span className="numerator">(actual - predicted)²</span><span className="denominator">actual</span></span>
+                MSPE = <span className="fraction"><span className="numerator">1</span><span className="denominator">N</span></span> <span className="sigma">Σ</span> <span className="fraction"><span className="numerator">(actual - predicted)²</span><span className="denominator">actual</span></span>
+              </div>
+              <div className="formula-note">
+                Lower MSPE = more accurate prediction
               </div>
             </div>
 
             <div className="formula-box">
-              <div className="formula-label">Mean Squared Percentage Error:</div>
+              <div className="formula-label">Contrarian Score:</div>
               <div className="formula">
-                MSPE = <span className="fraction"><span className="numerator">1</span><span className="denominator">N</span></span> <span className="sigma">Σ</span> SPE
+                Contrarian = 1 - |correlation with meta-prediction|
               </div>
               <div className="formula-note">
-                Where N = number of time points in your prediction
+                Higher score = more unique prediction (0.5 to 1.0)
               </div>
             </div>
           </div>
 
           <div className="scoring-column">
+            <div className="formula-box payoff-box">
+              <div className="formula-label">Payoff Formula:</div>
+              <div className="formula payoff-formula">
+                Payoff = Stake × Accuracy × Contrarian × Progress
+              </div>
+            </div>
+
             <div className="scoring-details">
-              <p>
-                <strong>Lower MSPE is better.</strong> For each time point in your prediction:
-              </p>
+              <p><strong>Breaking it down:</strong></p>
               <ul>
-                <li>The closer your predicted price is to the actual price, the lower your error</li>
-                <li>Dividing by actual price normalizes across different asset values</li>
-                <li>Perfect predictions result in an MSPE of 0</li>
-                <li>MSPE updates live as the market moves</li>
+                <li><strong>Accuracy Multiplier</strong> = N ÷ (1 + MSPE), capped at 10×</li>
+                <li><strong>Contrarian Bonus</strong> = 1.0× to 2.0× based on uniqueness</li>
+                <li><strong>Progress Factor</strong> = 100% if held to completion, reduced for early close</li>
               </ul>
             </div>
 
-            <div className="formula-box payoff-box">
-              <div className="formula-label">Payoff Formula:</div>
-              <div className="formula">
-                Payoff = <span className="fraction"><span className="numerator">Stake × N</span><span className="denominator">MSPE</span></span>
-              </div>
-              <div className="formula-note">
-                Lower MSPE = Higher rewards!
-              </div>
-            </div>
-
             <div className="rewards-info">
-              <h4>Rewards</h4>
+              <h4>Payoff Bounds</h4>
               <p>
-                The more accurate your prediction path, the higher your payoff. Beat other traders by minimizing your Mean Squared Percentage Error!
+                Minimum: 10% of stake | Maximum: 100× stake
               </p>
             </div>
           </div>
@@ -68,31 +66,62 @@ export default function ScoringPage() {
       </div>
 
       <div className="scoring-examples">
-        <h2>Understanding Your Score</h2>
+        <h2>Meta-Prediction & Contrarian Rewards</h2>
+
+        <div className="meta-explanation">
+          <p>
+            All user predictions are aggregated into a <strong>meta-prediction</strong> for each asset.
+            This represents the "crowd consensus" of where the price will go.
+          </p>
+          <p>
+            When you make a prediction that <strong>differs from the meta-prediction AND turns out to be accurate</strong>,
+            you earn bonus rewards. This incentivizes independent thinking over following the herd.
+          </p>
+        </div>
+
+        <h2 style={{marginTop: '2rem'}}>Understanding Your Score</h2>
 
         <div className="example-grid">
           <div className="example-card">
-            <h3>Excellent Prediction</h3>
-            <div className="example-mspe good">MSPE &lt; 1.0</div>
-            <p>Your predicted path closely follows the actual price movement. You'll earn significant rewards.</p>
+            <h3>Best Case</h3>
+            <div className="example-mspe good">Accurate + Contrarian</div>
+            <p>Low MSPE and high contrarian score. You predicted correctly while others were wrong. Maximum rewards!</p>
           </div>
 
           <div className="example-card">
-            <h3>Good Prediction</h3>
-            <div className="example-mspe moderate">MSPE 1.0 - 5.0</div>
-            <p>Your prediction captures the general trend with some deviation. Solid returns expected.</p>
+            <h3>Good</h3>
+            <div className="example-mspe moderate">Accurate + Consensus</div>
+            <p>Low MSPE but similar to meta-prediction. You were right, but so was everyone else. Solid returns.</p>
           </div>
 
           <div className="example-card">
-            <h3>Fair Prediction</h3>
-            <div className="example-mspe fair">MSPE 5.0 - 10.0</div>
-            <p>Noticeable difference between prediction and actual prices. Moderate rewards.</p>
+            <h3>Risky</h3>
+            <div className="example-mspe fair">Inaccurate + Contrarian</div>
+            <p>High MSPE but different from meta. You went against the crowd but were wrong. Lower rewards.</p>
           </div>
 
           <div className="example-card">
-            <h3>Poor Prediction</h3>
-            <div className="example-mspe poor">MSPE &gt; 10.0</div>
-            <p>Significant deviation from actual prices. Lower payoff, but still a learning opportunity.</p>
+            <h3>Worst Case</h3>
+            <div className="example-mspe poor">Inaccurate + Consensus</div>
+            <p>High MSPE and similar to meta. Wrong prediction following the crowd. Minimum rewards.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="scoring-examples">
+        <h2>Early Close vs Full Completion</h2>
+
+        <div className="example-grid" style={{gridTemplateColumns: 'repeat(2, 1fr)'}}>
+          <div className="example-card">
+            <h3>Full Completion</h3>
+            <div className="example-mspe good">100% Progress</div>
+            <p>Hold your prediction for the entire timeframe to receive full rewards. Button shows "Collect rewards" when ready.</p>
+          </div>
+
+          <div className="example-card">
+            <h3>Early Close</h3>
+            <div className="example-mspe fair">5-99% Progress</div>
+            <p>Close early after 5% progress for partial rewards. Progress factor reduces payoff proportionally.</p>
           </div>
         </div>
       </div>
@@ -100,11 +129,20 @@ export default function ScoringPage() {
       <div className="scoring-tips">
         <h2>Tips for Better Predictions</h2>
         <ul>
+          <li><strong>Think independently:</strong> Don't just follow the crowd - unique accurate predictions earn bonus rewards.</li>
           <li><strong>Study the historical pattern:</strong> Look at how the asset has moved in the past before drawing your prediction.</li>
           <li><strong>Consider volatility:</strong> High-volatility assets tend to have larger price swings.</li>
           <li><strong>Draw smooth curves:</strong> Erratic predictions are less likely to match actual price movements.</li>
-          <li><strong>Use the sentiment slider:</strong> Adjust bounds based on your bullish or bearish outlook.</li>
-          <li><strong>Start with longer timeframes:</strong> They tend to be more predictable than short-term movements.</li>
+          <li><strong>Hold to completion:</strong> Early closes reduce your progress factor and final payoff.</li>
+          <li><strong>Start with crypto:</strong> Crypto markets are open 24/7, while stocks only trade during market hours.</li>
+        </ul>
+      </div>
+
+      <div className="scoring-tips">
+        <h2>Market Hours</h2>
+        <ul>
+          <li><strong>Crypto (BTC, ETH, etc.):</strong> Trade and collect rewards 24/7</li>
+          <li><strong>Stocks & Commodities:</strong> 9:30 AM - 4:00 PM Eastern, Monday-Friday only</li>
         </ul>
       </div>
     </div>
