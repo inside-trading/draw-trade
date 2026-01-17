@@ -1529,10 +1529,11 @@ def get_user_settings():
     if not user:
         return jsonify({'error': 'User not found'}), 404
 
+    # Settings stored in session until we add DB migration
     return jsonify({
         'settings': {
-            'timezone': user.timezone or 'America/New_York',
-            'language': user.language or 'en'
+            'timezone': session.get('user_timezone', 'America/New_York'),
+            'language': session.get('user_language', 'en')
         },
         'availableTimezones': SUPPORTED_TIMEZONES,
         'availableLanguages': SUPPORTED_LANGUAGES
@@ -1551,27 +1552,24 @@ def update_user_settings():
 
     data = request.get_json()
 
-    # Update timezone if provided and valid
+    # Store settings in session until we add DB migration
     if 'timezone' in data:
         if data['timezone'] in SUPPORTED_TIMEZONES:
-            user.timezone = data['timezone']
+            session['user_timezone'] = data['timezone']
         else:
             return jsonify({'error': f'Invalid timezone. Supported: {", ".join(SUPPORTED_TIMEZONES[:5])}...'}), 400
 
-    # Update language if provided and valid
     if 'language' in data:
         if data['language'] in SUPPORTED_LANGUAGES:
-            user.language = data['language']
+            session['user_language'] = data['language']
         else:
             return jsonify({'error': f'Invalid language. Supported: {", ".join(SUPPORTED_LANGUAGES)}'}), 400
-
-    db.session.commit()
 
     return jsonify({
         'success': True,
         'settings': {
-            'timezone': user.timezone,
-            'language': user.language
+            'timezone': session.get('user_timezone', 'America/New_York'),
+            'language': session.get('user_language', 'en')
         }
     })
 
