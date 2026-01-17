@@ -63,8 +63,13 @@ export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
     return () => clearInterval(interval)
   }, [fetchData])
 
-  const handleClosePosition = async (predictionId, startPrice) => {
-    if (!window.confirm('Close this position early? You will receive a prorated payoff.')) {
+  const handleClosePosition = async (predictionId, startPrice, progress) => {
+    const isCompleted = progress >= 100
+    const confirmMessage = isCompleted
+      ? 'Collect your rewards for this completed prediction?'
+      : 'Close this position early? You will receive a prorated payoff.'
+
+    if (!window.confirm(confirmMessage)) {
       return
     }
 
@@ -75,12 +80,12 @@ export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
       }, { withCredentials: true })
 
       if (response.data.success) {
-        alert(`Position closed! Payoff: ${response.data.payoff} tokens`)
+        alert(response.data.message || `Payoff: ${response.data.payoff} tokens`)
         fetchData()
         if (onRefreshAuth) onRefreshAuth()
       }
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to close position')
+      alert(err.response?.data?.error || 'Failed to process request')
     } finally {
       setClosingId(null)
     }
@@ -297,11 +302,11 @@ export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
                   <td onClick={(e) => e.stopPropagation()}>
                     {pred.status === 'active' && pred.progress >= 5 && (
                       <button
-                        className="close-btn"
-                        onClick={() => handleClosePosition(pred.id, pred.startPrice)}
+                        className={pred.progress >= 100 ? 'collect-btn' : 'close-btn'}
+                        onClick={() => handleClosePosition(pred.id, pred.startPrice, pred.progress)}
                         disabled={closingId === pred.id}
                       >
-                        {closingId === pred.id ? '...' : 'Close'}
+                        {closingId === pred.id ? '...' : (pred.progress >= 100 ? 'Collect rewards' : 'Close')}
                       </button>
                     )}
                     {pred.status !== 'active' && (

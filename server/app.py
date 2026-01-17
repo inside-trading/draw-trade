@@ -11,10 +11,12 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 from db import db
-from models import User, Prediction, PriceData, UserPerformanceHistory
+from models import User, Prediction, PriceData, UserPerformanceHistory, MetaPrediction, DEFAULT_TOKEN_BALANCE
 from auth import auth_bp, init_auth, require_login, get_authenticated_user
 import twelve_data
 import math
+import pytz
+from functools import wraps
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", os.urandom(24).hex())
@@ -110,6 +112,193 @@ POPULAR_STOCKS = [
     {'symbol': 'GC=F', 'name': 'Gold Futures', 'type': 'Commodity'},
     {'symbol': 'SI=F', 'name': 'Silver Futures', 'type': 'Commodity'},
 ]
+
+# Supported languages
+SUPPORTED_LANGUAGES = ['en', 'es', 'fr', 'de', 'zh', 'ja', 'ko', 'pt']
+
+# Supported timezones (common ones)
+SUPPORTED_TIMEZONES = [
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+    'America/Toronto', 'America/Sao_Paulo', 'America/Mexico_City',
+    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+    'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Singapore', 'Asia/Seoul',
+    'Australia/Sydney', 'Pacific/Auckland', 'UTC'
+]
+
+
+def is_crypto(symbol):
+    """Check if a symbol is a cryptocurrency."""
+    return '-USD' in symbol.upper() or symbol.upper() in ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'DOGE']
+
+
+def is_market_open(symbol):
+    """
+    Check if the market is currently open for the given symbol.
+    Crypto markets are always open.
+    US stock market hours: 9:30 AM - 4:00 PM ET, Monday-Friday.
+    Futures have extended hours but we'll use regular hours for simplicity.
+    """
+    if is_crypto(symbol):
+        return True
+
+    # Get current time in Eastern timezone
+    eastern = pytz.timezone('America/New_York')
+    now = datetime.now(eastern)
+
+    # Check if it's a weekend
+    if now.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        return False
+
+    # Check market hours (9:30 AM - 4:00 PM ET)
+    market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+
+    return market_open <= now <= market_close
+
+
+def get_next_market_open(symbol):
+    """Get the next market open time for a symbol."""
+    if is_crypto(symbol):
+        return None  # Always open
+
+    eastern = pytz.timezone('America/New_York')
+    now = datetime.now(eastern)
+
+    # Find next weekday at 9:30 AM
+    next_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+
+    # If we're past market close today, move to next day
+    market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    if now >= market_close or now >= next_open:
+        next_open += timedelta(days=1)
+
+    # Skip weekends
+    while next_open.weekday() >= 5:
+        next_open += timedelta(days=1)
+
+    return next_open.isoformat()
+
+
+def calculate_contrarian_score(prediction_series, meta_series):
+    """
+    Calculate how different a prediction is from the meta-prediction.
+    Returns a score where higher = more contrarian.
+    Uses correlation-based measure: contrarian_score = 1 - abs(correlation)
+    """
+    if not prediction_series or not meta_series:
+        return 0.5  # Neutral score if no comparison possible
+
+    # Align series by length
+    min_len = min(len(prediction_series), len(meta_series))
+    if min_len < 2:
+        return 0.5
+
+    pred_prices = [p['price'] for p in prediction_series[:min_len]]
+    meta_prices = [p['price'] for p in meta_series[:min_len]]
+
+    # Calculate percentage changes instead of raw prices
+    pred_changes = [(pred_prices[i] - pred_prices[i-1]) / pred_prices[i-1] if pred_prices[i-1] != 0 else 0
+                    for i in range(1, len(pred_prices))]
+    meta_changes = [(meta_prices[i] - meta_prices[i-1]) / meta_prices[i-1] if meta_prices[i-1] != 0 else 0
+                    for i in range(1, len(meta_prices))]
+
+    if not pred_changes or not meta_changes:
+        return 0.5
+
+    # Calculate correlation
+    n = len(pred_changes)
+    mean_pred = sum(pred_changes) / n
+    mean_meta = sum(meta_changes) / n
+
+    numerator = sum((pred_changes[i] - mean_pred) * (meta_changes[i] - mean_meta) for i in range(n))
+    pred_variance = sum((p - mean_pred) ** 2 for p in pred_changes)
+    meta_variance = sum((m - mean_meta) ** 2 for m in meta_changes)
+
+    if pred_variance == 0 or meta_variance == 0:
+        return 0.5
+
+    correlation = numerator / math.sqrt(pred_variance * meta_variance)
+
+    # Contrarian score: 0 = same as consensus, 1 = completely opposite
+    # We reward both being different AND being accurate
+    contrarian_score = (1 - abs(correlation)) * 0.5 + 0.5  # Scale to 0.5-1.0 range
+
+    return round(contrarian_score, 4)
+
+
+def calculate_new_payoff(staked_tokens, accuracy_score, contrarian_score, n_points, is_early_close=False, progress=1.0):
+    """
+    New payoff function that rewards both accuracy and contrarian predictions.
+
+    Payoff = stake * (accuracy_multiplier * contrarian_bonus) * progress_factor
+
+    Where:
+    - accuracy_multiplier = n_points / (1 + MSPE)  (higher for lower MSPE)
+    - contrarian_bonus = 1 + (contrarian_score - 0.5) * 2  (1.0 to 2.0x)
+    - progress_factor = 0.5 + 0.5 * progress (for early close)
+    """
+    if staked_tokens <= 0 or accuracy_score is None:
+        return 0
+
+    # Base accuracy multiplier (capped to prevent extreme values)
+    mspe_capped = max(accuracy_score, 0.001)  # Prevent division by near-zero
+    accuracy_multiplier = min(n_points / (1 + mspe_capped), n_points * 10)  # Cap at 10x n_points
+
+    # Contrarian bonus (1.0x to 2.0x)
+    c_score = contrarian_score if contrarian_score is not None else 0.5
+    contrarian_bonus = 1.0 + (c_score - 0.5) * 2.0
+
+    # Progress factor for early close
+    progress_factor = 1.0 if not is_early_close else (0.5 + 0.5 * progress)
+
+    # Calculate final payoff
+    raw_payoff = staked_tokens * accuracy_multiplier * contrarian_bonus * progress_factor
+
+    # Apply reasonable bounds (0.1x to 100x stake)
+    min_payoff = int(staked_tokens * 0.1)
+    max_payoff = int(staked_tokens * 100)
+
+    return max(min_payoff, min(int(raw_payoff), max_payoff))
+
+
+def update_meta_prediction(symbol, new_prediction_series):
+    """Update the meta-prediction for a symbol by incorporating a new prediction."""
+    meta = MetaPrediction.query.filter_by(symbol=symbol).first()
+
+    if not meta:
+        # Create new meta-prediction
+        meta = MetaPrediction(
+            symbol=symbol,
+            price_series=json.dumps(new_prediction_series),
+            prediction_count=1
+        )
+        db.session.add(meta)
+    else:
+        # Update existing meta-prediction with weighted average
+        existing_series = json.loads(meta.price_series) if meta.price_series else []
+        count = meta.prediction_count
+
+        # Weighted average: existing gets weight=count, new gets weight=1
+        updated_series = []
+        max_len = max(len(existing_series), len(new_prediction_series))
+
+        for i in range(max_len):
+            if i < len(existing_series) and i < len(new_prediction_series):
+                avg_price = (existing_series[i]['price'] * count + new_prediction_series[i]['price']) / (count + 1)
+                updated_series.append({
+                    'price': round(avg_price, 2),
+                    'timestamp': new_prediction_series[i].get('timestamp', existing_series[i].get('timestamp'))
+                })
+            elif i < len(new_prediction_series):
+                updated_series.append(new_prediction_series[i])
+            else:
+                updated_series.append(existing_series[i])
+
+        meta.price_series = json.dumps(updated_series)
+        meta.prediction_count = count + 1
+
+    db.session.commit()
+    return meta
 
 @app.route('/api/search')
 def search_assets():
@@ -408,6 +597,15 @@ def submit_prediction():
     if not symbol or not points or len(points) < 2:
         return jsonify({'error': 'Invalid prediction data'}), 400
 
+    # Check market hours for non-crypto assets
+    if not is_market_open(symbol):
+        next_open = get_next_market_open(symbol)
+        return jsonify({
+            'error': f'Market is closed. Trading available during market hours (9:30 AM - 4:00 PM ET, Mon-Fri).',
+            'nextOpen': next_open,
+            'isCrypto': False
+        }), 400
+
     # Use get_authenticated_user to support both cookie and token auth
     auth_user = get_authenticated_user()
     if not auth_user:
@@ -485,6 +683,11 @@ def submit_prediction():
             'timestamp': timestamp.isoformat()
         })
 
+    # Get meta-prediction for contrarian score calculation
+    meta = MetaPrediction.query.filter_by(symbol=symbol).first()
+    meta_series = json.loads(meta.price_series) if meta and meta.price_series else []
+    contrarian_score = calculate_contrarian_score(price_series, meta_series)
+
     prediction = Prediction(
         user_id=user_id,
         symbol=symbol,
@@ -493,18 +696,23 @@ def submit_prediction():
         start_price=price_series[0]['price'],
         end_price=price_series[-1]['price'],
         price_series=json.dumps(price_series),
-        staked_tokens=staked_tokens
+        staked_tokens=staked_tokens,
+        contrarian_score=contrarian_score
     )
 
     db.session.add(prediction)
     db.session.commit()
+
+    # Update meta-prediction with this new prediction
+    update_meta_prediction(symbol, price_series)
 
     return jsonify({
         'success': True,
         'predictionId': prediction.id,
         'message': 'Prediction saved successfully',
         'tokenBalance': user_balance,
-        'priceSeries': price_series
+        'priceSeries': price_series,
+        'contrarianScore': contrarian_score
     })
 
 @app.route('/api/user/predictions')
@@ -709,8 +917,8 @@ def calculate_estimated_payoff(prediction, current_price=None):
 
 @app.route('/api/predictions/<int:prediction_id>/close', methods=['POST'])
 @require_login
-def close_prediction_early(prediction_id):
-    """Close a prediction early and receive prorated payoff."""
+def close_or_collect_prediction(prediction_id):
+    """Close a prediction early or collect rewards for completed predictions."""
     prediction = Prediction.query.get(prediction_id)
     if not prediction:
         return jsonify({'error': 'Prediction not found'}), 404
@@ -723,11 +931,24 @@ def close_prediction_early(prediction_id):
     if prediction.status != 'active':
         return jsonify({'error': 'Prediction is not active'}), 400
 
-    data = request.get_json()
+    # Check market hours for non-crypto assets
+    if not is_market_open(prediction.symbol):
+        next_open = get_next_market_open(prediction.symbol)
+        return jsonify({
+            'error': f'Market is closed. Try again during market hours (9:30 AM - 4:00 PM ET, Mon-Fri).',
+            'nextOpen': next_open,
+            'isCrypto': False
+        }), 400
+
+    data = request.get_json() or {}
     current_price = data.get('currentPrice')
 
+    # If no current price provided, try to fetch it
     if current_price is None or current_price <= 0:
-        return jsonify({'error': 'Valid current price required'}), 400
+        # Use the start price as a fallback (will result in lower accuracy score)
+        current_price = prediction.start_price
+        if current_price is None or current_price <= 0:
+            return jsonify({'error': 'Valid current price required'}), 400
 
     price_series = json.loads(prediction.price_series) if prediction.price_series else []
     n_total = len(price_series)
@@ -751,34 +972,40 @@ def close_prediction_early(prediction_id):
     elapsed = now - prediction_created
     progress = min(1.0, elapsed.total_seconds() / total_duration.total_seconds())
 
-    if progress < 0.05:
+    # Determine if this is early close or reward collection
+    is_early_close = progress < 1.0
+    is_completed = progress >= 1.0
+
+    # For early close, require minimum 5% progress
+    if is_early_close and progress < 0.05:
         return jsonify({'error': 'Cannot close prediction in first 5% of timeframe'}), 400
 
     # Calculate MSPE over elapsed points
     current_point_index = min(int(progress * n_total), n_total - 1)
-    n_elapsed = current_point_index + 1
+    n_elapsed = current_point_index + 1 if is_early_close else n_total
 
     spe_sum = 0.0
     for i in range(n_elapsed):
         predicted_price = price_series[i]['price']
         diff = current_price - predicted_price
-        spe = (diff * diff) / current_price
+        spe = (diff * diff) / current_price if current_price > 0 else 0
         spe_sum += spe
 
-    mspe = spe_sum / n_elapsed
+    mspe = spe_sum / n_elapsed if n_elapsed > 0 else 0
     prediction.accuracy_score = round(mspe, 6)
 
-    # Calculate prorated payoff
-    # Payoff = (stake * n_elapsed / MSPE) * progress_multiplier
-    # Early close gets reduced payoff (progress_multiplier)
-    if mspe > 0 and prediction.staked_tokens > 0:
-        base_payoff = (prediction.staked_tokens * n_elapsed) / mspe
-        progress_multiplier = 0.5 + (progress * 0.5)  # 50% to 100% based on progress
-        payoff = int(base_payoff * progress_multiplier)
-    else:
-        payoff = 0
+    # Calculate payoff using new function with contrarian bonus
+    payoff = calculate_new_payoff(
+        prediction.staked_tokens,
+        mspe,
+        prediction.contrarian_score,
+        n_total,
+        is_early_close=is_early_close,
+        progress=progress
+    )
 
-    prediction.status = 'closed'
+    # Set status based on whether it's early close or full completion
+    prediction.status = 'closed' if is_early_close else 'completed'
     prediction.rewards_earned = payoff
 
     # Credit user
@@ -789,14 +1016,22 @@ def close_prediction_early(prediction_id):
 
     db.session.commit()
 
+    # Different messages for close vs collect
+    if is_completed:
+        message = f'Rewards collected! You earned {payoff:,} tokens.'
+    else:
+        message = f'Position closed early at {round(progress * 100, 1)}% progress. You received {payoff:,} tokens.'
+
     return jsonify({
         'success': True,
         'predictionId': prediction.id,
         'mspe': prediction.accuracy_score,
+        'contrarianScore': prediction.contrarian_score,
         'progress': round(progress * 100, 1),
         'payoff': payoff,
         'newBalance': user.token_balance if user else 0,
-        'message': f'Position closed early at {round(progress * 100, 1)}% progress'
+        'message': message,
+        'isEarlyClose': is_early_close
     })
 
 
@@ -1281,6 +1516,94 @@ def record_all_performance_snapshots():
     return jsonify({
         'success': True,
         'snapshotsRecorded': recorded
+    })
+
+
+@app.route('/api/user/settings', methods=['GET'])
+@require_login
+def get_user_settings():
+    """Get current user settings."""
+    auth_user = get_authenticated_user()
+    user = User.query.get(auth_user.id)
+
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    return jsonify({
+        'settings': {
+            'timezone': user.timezone,
+            'language': user.language
+        },
+        'availableTimezones': SUPPORTED_TIMEZONES,
+        'availableLanguages': SUPPORTED_LANGUAGES
+    })
+
+
+@app.route('/api/user/settings', methods=['PUT'])
+@require_login
+def update_user_settings():
+    """Update user settings (timezone, language)."""
+    auth_user = get_authenticated_user()
+    user = User.query.get(auth_user.id)
+
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    data = request.get_json()
+
+    # Update timezone if provided and valid
+    if 'timezone' in data:
+        if data['timezone'] in SUPPORTED_TIMEZONES:
+            user.timezone = data['timezone']
+        else:
+            return jsonify({'error': f'Invalid timezone. Supported: {", ".join(SUPPORTED_TIMEZONES[:5])}...'}), 400
+
+    # Update language if provided and valid
+    if 'language' in data:
+        if data['language'] in SUPPORTED_LANGUAGES:
+            user.language = data['language']
+        else:
+            return jsonify({'error': f'Invalid language. Supported: {", ".join(SUPPORTED_LANGUAGES)}'}), 400
+
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'settings': {
+            'timezone': user.timezone,
+            'language': user.language
+        }
+    })
+
+
+@app.route('/api/admin/reset-balances', methods=['POST'])
+def reset_all_user_balances():
+    """Reset all user token balances to default (100). Admin endpoint."""
+    # In production, this should have admin authentication
+    data = request.get_json() or {}
+    admin_key = data.get('adminKey')
+
+    # Simple security check - in production use proper admin auth
+    expected_key = os.environ.get('ADMIN_SECRET_KEY', 'admin-reset-key-2024')
+    if admin_key != expected_key:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    # Reset all user balances
+    users = User.query.all()
+    reset_count = 0
+
+    for user in users:
+        user.token_balance = DEFAULT_TOKEN_BALANCE
+        reset_count += 1
+
+    db.session.commit()
+
+    logging.info(f"Admin action: Reset {reset_count} user balances to {DEFAULT_TOKEN_BALANCE}")
+
+    return jsonify({
+        'success': True,
+        'message': f'Reset {reset_count} user balances to {DEFAULT_TOKEN_BALANCE} tokens',
+        'usersReset': reset_count
     })
 
 

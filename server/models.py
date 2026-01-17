@@ -15,10 +15,13 @@ class User(UserMixin, db.Model):
     last_name = db.Column(db.String, nullable=True)
     profile_image_url = db.Column(db.String, nullable=True)
     token_balance = db.Column(db.Integer, default=DEFAULT_TOKEN_BALANCE, nullable=False)
+    timezone = db.Column(db.String(50), default='America/New_York', nullable=False)
+    language = db.Column(db.String(10), default='en', nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     predictions = db.relationship('Prediction', backref='user', lazy=True)
+
 
 class Prediction(db.Model):
     __tablename__ = 'predictions'
@@ -34,8 +37,24 @@ class Prediction(db.Model):
     price_series = db.Column(db.Text, nullable=False)
     staked_tokens = db.Column(db.Integer, default=0, nullable=False)
     accuracy_score = db.Column(db.Float, nullable=True)
+    contrarian_score = db.Column(db.Float, nullable=True)  # How different from meta-prediction
     rewards_earned = db.Column(db.Integer, default=0, nullable=False)
     status = db.Column(db.String(20), default='active')
+
+
+class MetaPrediction(db.Model):
+    """Aggregated community prediction for each symbol."""
+    __tablename__ = 'meta_predictions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    symbol = db.Column(db.String(20), nullable=False, index=True)
+    price_series = db.Column(db.Text, nullable=False)  # JSON array of aggregated prices
+    prediction_count = db.Column(db.Integer, default=0)
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('symbol', name='unique_meta_prediction_symbol'),
+    )
 
 
 class PriceData(db.Model):
