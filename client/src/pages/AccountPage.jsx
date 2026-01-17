@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../config/api'
 import { formatLocalDate } from '../utils/dateUtils'
+import PerformanceHistoryChart from '../components/PerformanceHistoryChart'
+import TradeDetailModal from '../components/TradeDetailModal'
 
 const TIMEFRAME_LABELS = {
   hourly: 'Hourly',
@@ -20,23 +22,28 @@ const STATUS_LABELS = {
 export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
   const [stats, setStats] = useState(null)
   const [predictions, setPredictions] = useState([])
+  const [performanceHistory, setPerformanceHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all') // 'all', 'active', 'completed'
   const [closingId, setClosingId] = useState(null)
+  const [selectedMetric, setSelectedMetric] = useState('tokenBalance')
+  const [selectedTradeId, setSelectedTradeId] = useState(null)
 
   const fetchData = useCallback(async () => {
     if (!isAuthenticated) return
 
     setLoading(true)
     try {
-      const [statsRes, predictionsRes] = await Promise.all([
+      const [statsRes, predictionsRes, historyRes] = await Promise.all([
         api.get('/api/user/stats', { withCredentials: true }),
-        api.get('/api/user/predictions/detailed', { withCredentials: true })
+        api.get('/api/user/predictions/detailed', { withCredentials: true }),
+        api.get('/api/user/performance-history', { withCredentials: true })
       ])
 
       setStats(statsRes.data)
       setPredictions(predictionsRes.data.predictions)
+      setPerformanceHistory(historyRes.data.history)
       setError(null)
     } catch (err) {
       setError('Failed to load account data')
@@ -141,8 +148,9 @@ export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
           <div className="stat-sublabel">of {stats?.stats?.totalRankedUsers || 0} users</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{stats?.stats?.meanMspe?.toFixed(4) || '-'}</div>
-          <div className="stat-label">Mean MSPE</div>
+          <div className="stat-value">{stats?.stats?.timeWeightedMspe?.toFixed(4) || '-'}</div>
+          <div className="stat-label">TW-MSPE</div>
+          <div className="stat-sublabel">Mean: {stats?.stats?.meanMspe?.toFixed(4) || '-'}</div>
         </div>
         <div className={`stat-card ${(stats?.stats?.profitLoss || 0) >= 0 ? 'positive' : 'negative'}`}>
           <div className="stat-value">
@@ -173,6 +181,31 @@ export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
         <div className="stat-item">
           <span className="stat-num">{stats?.stats?.totalRewards?.toLocaleString() || 0}</span>
           <span className="stat-text">Total Rewards</span>
+        </div>
+      </div>
+
+      {/* Performance History Chart */}
+      <div className="performance-history-section">
+        <div className="section-header">
+          <h2>Performance History</h2>
+          <div className="metric-selector">
+            <select
+              value={selectedMetric}
+              onChange={(e) => setSelectedMetric(e.target.value)}
+              className="metric-dropdown"
+            >
+              <option value="tokenBalance">Token Balance</option>
+              <option value="profitLoss">Profit/Loss</option>
+              <option value="timeWeightedMspe">TW-MSPE</option>
+              <option value="rank">Rank</option>
+            </select>
+          </div>
+        </div>
+        <div className="performance-chart-container">
+          <PerformanceHistoryChart
+            history={performanceHistory}
+            metric={selectedMetric}
+          />
         </div>
       </div>
 
@@ -223,9 +256,17 @@ export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
             </thead>
             <tbody>
               {filteredPredictions.map(pred => (
-                <tr key={pred.id}>
+                <tr
+                  key={pred.id}
+                  className={pred.status !== 'active' ? 'clickable-row' : ''}
+                  onClick={() => pred.status !== 'active' && setSelectedTradeId(pred.id)}
+                >
                   <td className="asset-cell">
-                    <Link to={`/?symbol=${pred.symbol}`} className="asset-link">
+                    <Link
+                      to={`/?symbol=${pred.symbol}`}
+                      className="asset-link"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {pred.symbol}
                     </Link>
                   </td>
@@ -253,7 +294,7 @@ export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
                     )}
                   </td>
                   <td className="date-cell">{formatLocalDate(pred.createdAt)}</td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     {pred.status === 'active' && pred.progress >= 5 && (
                       <button
                         className="close-btn"
@@ -261,6 +302,14 @@ export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
                         disabled={closingId === pred.id}
                       >
                         {closingId === pred.id ? '...' : 'Close'}
+                      </button>
+                    )}
+                    {pred.status !== 'active' && (
+                      <button
+                        className="view-btn"
+                        onClick={() => setSelectedTradeId(pred.id)}
+                      >
+                        View
                       </button>
                     )}
                   </td>
@@ -285,6 +334,14 @@ export default function AccountPage({ user, isAuthenticated, onRefreshAuth }) {
           </div>
         </div>
       </div>
+
+      {/* Trade Detail Modal */}
+      {selectedTradeId && (
+        <TradeDetailModal
+          tradeId={selectedTradeId}
+          onClose={() => setSelectedTradeId(null)}
+        />
+      )}
     </div>
   )
 }

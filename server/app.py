@@ -11,9 +11,10 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 
 from db import db
-from models import User, Prediction, PriceData
+from models import User, Prediction, PriceData, UserPerformanceHistory
 from auth import auth_bp, init_auth, require_login, get_authenticated_user
 import twelve_data
+import math
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", os.urandom(24).hex())
@@ -799,44 +800,94 @@ def close_prediction_early(prediction_id):
     })
 
 
+def calculate_time_weighted_mspe(predictions, half_life_days=30):
+    """
+    Calculate time-weighted MSPE where recent predictions have more weight.
+    Uses exponential decay with configurable half-life.
+
+    Weight = exp(-ln(2) * days_ago / half_life_days)
+
+    Time-weighted MSPE = Σ(weight_i * mspe_i) / Σ(weight_i)
+    """
+    now = datetime.utcnow()
+    decay_constant = math.log(2) / half_life_days
+
+    total_weighted_mspe = 0.0
+    total_weight = 0.0
+
+    for pred in predictions:
+        if pred.accuracy_score is None:
+            continue
+
+        days_ago = (now - pred.created_at).total_seconds() / 86400.0
+        weight = math.exp(-decay_constant * days_ago)
+
+        total_weighted_mspe += weight * pred.accuracy_score
+        total_weight += weight
+
+    if total_weight == 0:
+        return None
+
+    return total_weighted_mspe / total_weight
+
+
 @app.route('/api/leaderboard')
 def get_leaderboard():
-    """Get leaderboard of users ranked by mean MSPE across all predictions."""
+    """Get leaderboard of users ranked by time-weighted MSPE across all predictions."""
     from sqlalchemy import func
 
-    # Get users with their average MSPE and prediction count
-    user_stats = db.session.query(
-        Prediction.user_id,
-        func.avg(Prediction.accuracy_score).label('mean_mspe'),
-        func.count(Prediction.id).label('prediction_count'),
-        func.sum(Prediction.staked_tokens).label('total_staked'),
-        func.sum(Prediction.rewards_earned).label('total_rewards')
-    ).filter(
+    # Get all users with predictions
+    user_ids = db.session.query(Prediction.user_id).filter(
         Prediction.user_id.isnot(None),
         Prediction.accuracy_score.isnot(None)
-    ).group_by(Prediction.user_id).all()
+    ).distinct().all()
+
+    user_ids = [u[0] for u in user_ids]
 
     leaderboard = []
-    for stat in user_stats:
-        user = User.query.get(stat.user_id)
-        if user:
-            display_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
-            if not display_name:
-                display_name = user.email.split('@')[0] if user.email else 'Anonymous'
+    for user_id in user_ids:
+        user = User.query.get(user_id)
+        if not user:
+            continue
 
-            leaderboard.append({
-                'userId': user.id,
-                'displayName': display_name,
-                'meanMspe': round(float(stat.mean_mspe), 6) if stat.mean_mspe else None,
-                'predictionCount': stat.prediction_count,
-                'totalStaked': stat.total_staked or 0,
-                'totalRewards': stat.total_rewards or 0,
-                'tokenBalance': user.token_balance,
-                'profitLoss': (stat.total_rewards or 0) - (stat.total_staked or 0)
-            })
+        # Get all predictions with scores for this user
+        predictions = Prediction.query.filter(
+            Prediction.user_id == user_id,
+            Prediction.accuracy_score.isnot(None)
+        ).all()
 
-    # Sort by mean MSPE (lower is better), then by token balance
-    leaderboard.sort(key=lambda x: (x['meanMspe'] if x['meanMspe'] is not None else float('inf'), -x['tokenBalance']))
+        if not predictions:
+            continue
+
+        # Calculate time-weighted MSPE
+        tw_mspe = calculate_time_weighted_mspe(predictions)
+
+        # Calculate regular mean MSPE for comparison
+        mean_mspe = sum(p.accuracy_score for p in predictions) / len(predictions)
+
+        # Calculate totals
+        total_staked = sum(p.staked_tokens for p in predictions)
+        total_rewards = sum(p.rewards_earned or 0 for p in predictions)
+        prediction_count = len(predictions)
+
+        display_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+        if not display_name:
+            display_name = user.email.split('@')[0] if user.email else 'Anonymous'
+
+        leaderboard.append({
+            'userId': user.id,
+            'displayName': display_name,
+            'timeWeightedMspe': round(float(tw_mspe), 6) if tw_mspe else None,
+            'meanMspe': round(float(mean_mspe), 6) if mean_mspe else None,
+            'predictionCount': prediction_count,
+            'totalStaked': total_staked or 0,
+            'totalRewards': total_rewards or 0,
+            'tokenBalance': user.token_balance,
+            'profitLoss': (total_rewards or 0) - (total_staked or 0)
+        })
+
+    # Sort by time-weighted MSPE (lower is better), then by token balance
+    leaderboard.sort(key=lambda x: (x['timeWeightedMspe'] if x['timeWeightedMspe'] is not None else float('inf'), -x['tokenBalance']))
 
     # Add rank
     for i, entry in enumerate(leaderboard):
@@ -869,21 +920,31 @@ def get_user_stats():
     mspe_values = [p.accuracy_score for p in predictions if p.accuracy_score is not None]
     mean_mspe = sum(mspe_values) / len(mspe_values) if mspe_values else None
 
+    # Calculate time-weighted MSPE
+    tw_mspe = calculate_time_weighted_mspe(predictions)
+
     # Calculate totals
     total_staked = sum(p.staked_tokens for p in predictions)
     total_rewards = sum(p.rewards_earned or 0 for p in predictions)
 
-    # Get user's rank on leaderboard
-    all_user_mspes = db.session.query(
-        Prediction.user_id,
-        func.avg(Prediction.accuracy_score).label('mean_mspe')
-    ).filter(
+    # Get user's rank on leaderboard (using time-weighted MSPE)
+    all_user_ids = db.session.query(Prediction.user_id).filter(
         Prediction.user_id.isnot(None),
         Prediction.accuracy_score.isnot(None)
-    ).group_by(Prediction.user_id).all()
+    ).distinct().all()
 
-    sorted_users = sorted(all_user_mspes, key=lambda x: x.mean_mspe if x.mean_mspe else float('inf'))
-    rank = next((i + 1 for i, u in enumerate(sorted_users) if u.user_id == auth_user.id), None)
+    user_tw_mspes = []
+    for (uid,) in all_user_ids:
+        user_preds = Prediction.query.filter(
+            Prediction.user_id == uid,
+            Prediction.accuracy_score.isnot(None)
+        ).all()
+        user_tw = calculate_time_weighted_mspe(user_preds)
+        if user_tw is not None:
+            user_tw_mspes.append((uid, user_tw))
+
+    sorted_users = sorted(user_tw_mspes, key=lambda x: x[1])
+    rank = next((i + 1 for i, (uid, _) in enumerate(sorted_users) if uid == auth_user.id), None)
 
     # Build prediction history for chart
     prediction_history = []
@@ -913,6 +974,7 @@ def get_user_stats():
             'activePredictions': len(active_predictions),
             'completedPredictions': len(completed_predictions),
             'meanMspe': round(mean_mspe, 6) if mean_mspe else None,
+            'timeWeightedMspe': round(tw_mspe, 6) if tw_mspe else None,
             'totalStaked': total_staked,
             'totalRewards': total_rewards,
             'profitLoss': total_rewards - total_staked,
@@ -978,6 +1040,248 @@ def get_user_predictions_detailed():
         })
 
     return jsonify({'predictions': result})
+
+
+@app.route('/api/trades/top-profitable')
+def get_top_profitable_trades():
+    """Get the most profitable trades of all time."""
+    limit = request.args.get('limit', 20, type=int)
+
+    # Get completed predictions sorted by profit (rewards - staked)
+    predictions = Prediction.query.filter(
+        Prediction.status.in_(['completed', 'closed']),
+        Prediction.rewards_earned.isnot(None),
+        Prediction.user_id.isnot(None)
+    ).order_by(
+        (Prediction.rewards_earned - Prediction.staked_tokens).desc()
+    ).limit(limit).all()
+
+    result = []
+    for p in predictions:
+        user = User.query.get(p.user_id)
+        display_name = 'Anonymous'
+        if user:
+            display_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+            if not display_name:
+                display_name = user.email.split('@')[0] if user.email else 'Anonymous'
+
+        profit = (p.rewards_earned or 0) - p.staked_tokens
+
+        result.append({
+            'id': p.id,
+            'userId': p.user_id,
+            'userName': display_name,
+            'symbol': p.symbol,
+            'assetName': p.asset_name,
+            'timeframe': p.timeframe,
+            'stakedTokens': p.staked_tokens,
+            'rewardsEarned': p.rewards_earned or 0,
+            'profit': profit,
+            'mspe': p.accuracy_score,
+            'status': p.status,
+            'createdAt': p.created_at.isoformat()
+        })
+
+    return jsonify({
+        'trades': result,
+        'total': len(result)
+    })
+
+
+@app.route('/api/trades/<int:prediction_id>/details')
+def get_trade_details(prediction_id):
+    """Get detailed trade info including prediction series and actual price data for overlay."""
+    prediction = Prediction.query.get(prediction_id)
+    if not prediction:
+        return jsonify({'error': 'Trade not found'}), 404
+
+    # Get user info
+    user = None
+    display_name = 'Anonymous'
+    if prediction.user_id:
+        user = User.query.get(prediction.user_id)
+        if user:
+            display_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+            if not display_name:
+                display_name = user.email.split('@')[0] if user.email else 'Anonymous'
+
+    # Parse prediction price series
+    price_series = json.loads(prediction.price_series) if prediction.price_series else []
+
+    # Calculate progress
+    now = datetime.utcnow()
+    timeframe_durations = {
+        'hourly': timedelta(hours=1),
+        'daily': timedelta(days=1),
+        'weekly': timedelta(weeks=1),
+        'monthly': timedelta(days=30),
+        'yearly': timedelta(days=365)
+    }
+
+    total_duration = timeframe_durations.get(prediction.timeframe, timedelta(days=1))
+    elapsed = now - prediction.created_at
+    progress = min(1.0, elapsed.total_seconds() / total_duration.total_seconds())
+
+    # Calculate profit
+    profit = None
+    if prediction.status in ['completed', 'closed']:
+        profit = (prediction.rewards_earned or 0) - prediction.staked_tokens
+
+    # Get actual price data for the prediction period
+    actual_prices = []
+    interval_map = {
+        'hourly': '1min',
+        'daily': '1h',
+        'weekly': '1h',
+        'monthly': '1day',
+        'yearly': '1day'
+    }
+    interval = interval_map.get(prediction.timeframe, '1h')
+
+    # Get price data from cache
+    end_time = prediction.created_at + total_duration
+    if now < end_time:
+        end_time = now
+
+    price_data = PriceData.query.filter(
+        PriceData.symbol == prediction.symbol,
+        PriceData.interval == interval,
+        PriceData.timestamp >= prediction.created_at,
+        PriceData.timestamp <= end_time
+    ).order_by(PriceData.timestamp.asc()).all()
+
+    actual_prices = [
+        {
+            'timestamp': pd.timestamp.isoformat(),
+            'price': pd.close
+        }
+        for pd in price_data
+    ]
+
+    return jsonify({
+        'trade': {
+            'id': prediction.id,
+            'userId': prediction.user_id,
+            'userName': display_name,
+            'symbol': prediction.symbol,
+            'assetName': prediction.asset_name,
+            'timeframe': prediction.timeframe,
+            'startPrice': prediction.start_price,
+            'endPrice': prediction.end_price,
+            'stakedTokens': prediction.staked_tokens,
+            'rewardsEarned': prediction.rewards_earned,
+            'profit': profit,
+            'mspe': prediction.accuracy_score,
+            'status': prediction.status,
+            'progress': round(progress * 100, 1),
+            'createdAt': prediction.created_at.isoformat()
+        },
+        'predictionSeries': price_series,
+        'actualPrices': actual_prices
+    })
+
+
+@app.route('/api/user/performance-history')
+@require_login
+def get_user_performance_history():
+    """Get historical performance data for the current user."""
+    auth_user = get_authenticated_user()
+
+    # Get performance history records
+    history = UserPerformanceHistory.query.filter_by(
+        user_id=auth_user.id
+    ).order_by(UserPerformanceHistory.recorded_at.asc()).all()
+
+    return jsonify({
+        'history': [
+            {
+                'recordedAt': h.recorded_at.isoformat(),
+                'tokenBalance': h.token_balance,
+                'totalPredictions': h.total_predictions,
+                'completedPredictions': h.completed_predictions,
+                'meanMspe': h.mean_mspe,
+                'timeWeightedMspe': h.time_weighted_mspe,
+                'totalStaked': h.total_staked,
+                'totalRewards': h.total_rewards,
+                'profitLoss': h.profit_loss,
+                'rank': h.rank
+            }
+            for h in history
+        ]
+    })
+
+
+def record_user_performance_snapshot(user_id):
+    """Record a performance snapshot for a user."""
+    user = User.query.get(user_id)
+    if not user:
+        return None
+
+    predictions = Prediction.query.filter_by(user_id=user_id).all()
+    completed = [p for p in predictions if p.status in ('completed', 'closed')]
+
+    mspe_values = [p.accuracy_score for p in predictions if p.accuracy_score is not None]
+    mean_mspe = sum(mspe_values) / len(mspe_values) if mspe_values else None
+    tw_mspe = calculate_time_weighted_mspe(predictions)
+
+    total_staked = sum(p.staked_tokens for p in predictions)
+    total_rewards = sum(p.rewards_earned or 0 for p in predictions)
+
+    # Calculate rank
+    all_user_ids = db.session.query(Prediction.user_id).filter(
+        Prediction.user_id.isnot(None),
+        Prediction.accuracy_score.isnot(None)
+    ).distinct().all()
+
+    user_tw_mspes = []
+    for (uid,) in all_user_ids:
+        user_preds = Prediction.query.filter(
+            Prediction.user_id == uid,
+            Prediction.accuracy_score.isnot(None)
+        ).all()
+        user_tw = calculate_time_weighted_mspe(user_preds)
+        if user_tw is not None:
+            user_tw_mspes.append((uid, user_tw))
+
+    sorted_users = sorted(user_tw_mspes, key=lambda x: x[1])
+    rank = next((i + 1 for i, (uid, _) in enumerate(sorted_users) if uid == user_id), None)
+
+    snapshot = UserPerformanceHistory(
+        user_id=user_id,
+        token_balance=user.token_balance,
+        total_predictions=len(predictions),
+        completed_predictions=len(completed),
+        mean_mspe=mean_mspe,
+        time_weighted_mspe=tw_mspe,
+        total_staked=total_staked,
+        total_rewards=total_rewards,
+        profit_loss=total_rewards - total_staked,
+        rank=rank
+    )
+
+    db.session.add(snapshot)
+    db.session.commit()
+    return snapshot
+
+
+@app.route('/api/admin/record-snapshots', methods=['POST'])
+def record_all_performance_snapshots():
+    """Record performance snapshots for all users. Can be called by a cron job."""
+    # Get all users with predictions
+    user_ids = db.session.query(Prediction.user_id).filter(
+        Prediction.user_id.isnot(None)
+    ).distinct().all()
+
+    recorded = 0
+    for (user_id,) in user_ids:
+        snapshot = record_user_performance_snapshot(user_id)
+        if snapshot:
+            recorded += 1
+
+    return jsonify({
+        'success': True,
+        'snapshotsRecorded': recorded
+    })
 
 
 @app.route('/api/health')
