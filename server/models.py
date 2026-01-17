@@ -57,3 +57,25 @@ class PriceData(db.Model):
         db.UniqueConstraint('symbol', 'interval', 'timestamp', name='unique_price_point'),
         db.Index('idx_symbol_interval_timestamp', 'symbol', 'interval', 'timestamp'),
     )
+
+
+class UserPerformanceHistory(db.Model):
+    """Track user performance and token balance over time for historical charts."""
+    __tablename__ = 'user_performance_history'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.String, db.ForeignKey('users.id'), nullable=False, index=True)
+    recorded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    token_balance = db.Column(db.Integer, nullable=False)
+    total_predictions = db.Column(db.Integer, default=0)
+    completed_predictions = db.Column(db.Integer, default=0)
+    mean_mspe = db.Column(db.Float, nullable=True)
+    time_weighted_mspe = db.Column(db.Float, nullable=True)
+    total_staked = db.Column(db.Integer, default=0)
+    total_rewards = db.Column(db.Integer, default=0)
+    profit_loss = db.Column(db.Integer, default=0)
+    rank = db.Column(db.Integer, nullable=True)
+
+    __table_args__ = (
+        db.Index('idx_user_performance_time', 'user_id', 'recorded_at'),
+    )
