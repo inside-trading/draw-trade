@@ -291,13 +291,19 @@ function App() {
       {error && <div className="error-message">{error}</div>}
 
       <div className="prediction-controls">
+        {selectedAsset && chartBounds && (
+          <div className="current-price-display">
+            <span className="price-label">Price</span>
+            <span className="price-value">${chartBounds.lastPrice?.toFixed(2)}</span>
+          </div>
+        )}
         <div className="sentiment-slider-container">
           <div className="sentiment-labels">
             <span className="bearish-label">Bearish</span>
             <span className="sentiment-value">
-              {sentimentSlider < 30 ? 'Very Bearish' : 
-               sentimentSlider < 45 ? 'Bearish' : 
-               sentimentSlider <= 55 ? 'Neutral' : 
+              {sentimentSlider < 30 ? 'Very Bearish' :
+               sentimentSlider < 45 ? 'Bearish' :
+               sentimentSlider <= 55 ? 'Neutral' :
                sentimentSlider <= 70 ? 'Bullish' : 'Very Bullish'}
             </span>
             <span className="bullish-label">Bullish</span>
@@ -394,36 +400,6 @@ function App() {
           />
         </div>
       </MobileRotatePrompt>
-
-      {selectedAsset && chartBounds && (
-        <div className="info-bar">
-          <div className="info-item">
-            <div className="label">Asset</div>
-            <div className="value">{selectedAsset.symbol}</div>
-          </div>
-          <div className="info-item">
-            <div className="label">Current Price</div>
-            <div className="value">${chartBounds.lastPrice?.toFixed(2)}</div>
-          </div>
-          <div className="info-item">
-            <div className="label">Timeframe</div>
-            <div className="value">{TIMEFRAMES.find(t => t.id === timeframe)?.label}</div>
-          </div>
-          {liveScore && (
-            <div className="info-item live-score">
-              <div className="label">Your MSPE</div>
-              <div className={`value ${liveScore.mspe !== null && liveScore.mspe < 10 ? 'up' : 'down'}`}>
-                {liveScore.mspe !== null ? liveScore.mspe.toFixed(4) : '-'}
-                {liveScore.progress && <span className="progress-indicator"> ({liveScore.progress}%)</span>}
-              </div>
-            </div>
-          )}
-          <div className="info-item predictions-count">
-            <div className="label">Community Predictions</div>
-            <div className="value">{predictionCount}</div>
-          </div>
-        </div>
-      )}
 
           </>
         } />
