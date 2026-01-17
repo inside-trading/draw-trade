@@ -1577,16 +1577,13 @@ def update_user_settings():
 @app.route('/api/admin/reset-balances', methods=['POST'])
 def reset_all_user_balances():
     """Reset all user token balances to default (100). Admin endpoint."""
-    # In production, this should have admin authentication
     data = request.get_json() or {}
     admin_key = data.get('adminKey')
 
-    # Simple security check - in production use proper admin auth
     expected_key = os.environ.get('ADMIN_SECRET_KEY', 'admin-reset-key-2024')
     if admin_key != expected_key:
         return jsonify({'error': 'Unauthorized'}), 403
 
-    # Reset all user balances
     users = User.query.all()
     reset_count = 0
 
@@ -1602,6 +1599,38 @@ def reset_all_user_balances():
         'success': True,
         'message': f'Reset {reset_count} user balances to {DEFAULT_TOKEN_BALANCE} tokens',
         'usersReset': reset_count
+    })
+
+
+@app.route('/api/admin/wipe-all-data', methods=['POST'])
+def wipe_all_data():
+    """Delete all users, predictions, and related data. Nuclear option."""
+    data = request.get_json() or {}
+    admin_key = data.get('adminKey')
+
+    expected_key = os.environ.get('ADMIN_SECRET_KEY', 'admin-reset-key-2024')
+    if admin_key != expected_key:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    # Delete in order to respect foreign keys
+    predictions_deleted = Prediction.query.delete()
+    meta_deleted = MetaPrediction.query.delete()
+    history_deleted = UserPerformanceHistory.query.delete()
+    users_deleted = User.query.delete()
+
+    db.session.commit()
+
+    logging.info(f"Admin action: WIPED ALL DATA - {users_deleted} users, {predictions_deleted} predictions")
+
+    return jsonify({
+        'success': True,
+        'message': 'All data wiped',
+        'deleted': {
+            'users': users_deleted,
+            'predictions': predictions_deleted,
+            'metaPredictions': meta_deleted,
+            'performanceHistory': history_deleted
+        }
     })
 
 
