@@ -136,7 +136,6 @@ export default function LeaderboardPage({ currentUserId }) {
                   <th>Rank</th>
                   <th>Trader</th>
                   <th>TW-MSPE</th>
-                  <th>Mean MSPE</th>
                   <th>Predictions</th>
                   <th>Token Balance</th>
                   <th>Profit/Loss</th>
@@ -157,7 +156,6 @@ export default function LeaderboardPage({ currentUserId }) {
                       </span>
                     </td>
                     <td className="mspe-cell">{entry.timeWeightedMspe?.toFixed(4) || '-'}</td>
-                    <td className="mspe-cell secondary">{entry.meanMspe?.toFixed(4) || '-'}</td>
                     <td>{entry.predictionCount}</td>
                     <td className="balance-cell">{entry.tokenBalance.toLocaleString()}</td>
                     <td className={`pl-cell ${entry.profitLoss >= 0 ? 'positive' : 'negative'}`}>
